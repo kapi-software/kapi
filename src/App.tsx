@@ -3,8 +3,11 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@/lib/tauri";
 import { resolveThemeClass } from "@/lib/settings";
+import type { AppSettings } from "@/lib/settings";
 import { accentVars } from "@/lib/theme";
 import { normalizeLanguage } from "@/i18n";
 import i18n from "@/i18n";
@@ -57,6 +60,10 @@ export default function App() {
   const [entry, setEntry] = useState<"main" | "dock" | null>(null);
   const theme = useSettingsStore((s) => s.settings.theme);
   const language = useSettingsStore((s) => s.settings.language);
+  const dockEnabled = useSettingsStore((s) => s.settings.dock_enabled);
+  const dockPosition = useSettingsStore((s) => s.settings.dock_position);
+  const dockHotzoneWidth = useSettingsStore((s) => s.settings.dock_hotzone_width);
+  const dockExpandDelay = useSettingsStore((s) => s.settings.dock_expand_delay);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
 
   // 启动时加载设置（含数据库连接）
@@ -64,6 +71,47 @@ export default function App() {
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  // 跨窗口设置同步：任意窗口变更后广播，本窗口 store 补丁（docs/PANEL.md §4.1）
+  // Cross-window settings sync: broadcasts on change; the local store patches itself
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen<{ key: string; value: unknown } | { settings: AppSettings }>(
+      "settings:changed",
+      (e) => {
+        const p = e.payload;
+        if ("settings" in p) {
+          useSettingsStore.setState({ settings: p.settings });
+          return;
+        }
+        const cur = useSettingsStore.getState().settings;
+        // 类型防御：与当前值类型一致才采纳
+        // Type guard: adopt only when the type matches the current value
+        if (p.key in cur && typeof p.value === typeof cur[p.key as keyof AppSettings]) {
+          useSettingsStore.setState({
+            settings: { ...cur, [p.key]: p.value } as AppSettings,
+          });
+        }
+      }
+    );
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  // Dock 配置推送（docs/PANEL.md §4.1 实时生效）：主窗口设置页变更 → Rust 轮询服务
+  // Dock config push (live application): settings changes in the panel reach the Rust polling service
+  // 放在 App 根组件：主面板与 dock 窗口都会执行，不依赖某一窗口存活
+  // Lives in the App root: both panel and dock windows run it, independent of either surviving
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke("dock_set_config", {
+      enabled: dockEnabled,
+      position: dockPosition,
+      hotzoneWidth: dockHotzoneWidth,
+      expandDelayMs: dockExpandDelay,
+    }).catch((e) => console.error("dock_set_config 失败 / failed:", e));
+  }, [dockEnabled, dockPosition, dockHotzoneWidth, dockExpandDelay]);
 
   // 主题应用：light/dark/system → html.dark class（shadcn 约定）
   // Theme application: light/dark/system → html.dark class (shadcn convention)

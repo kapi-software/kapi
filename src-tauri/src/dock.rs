@@ -11,11 +11,10 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 const DOCK_W: i32 = 320;
 const DOCK_H: i32 = 560;
 
-// 轮询与热区参数（docs/DOCK.md §3–§4）
-// Polling and hotzone parameters (docs/DOCK.md §3–§4)
+// 轮询与冷却参数（docs/DOCK.md §3–§4）；热区宽度/展开延迟为可配置项，见 DockConfig
+// Polling and cooldown parameters (docs/DOCK.md §3–§4); hotzone width and expand delay are configurable in DockConfig
 const POLL_INTERVAL_MS: u64 = 100;
 const COOLDOWN_MS: u64 = 120;
-const HOTZONE_WIDTH: i32 = 12;
 
 // Dock 贴靠边（settings.dock_position：right / left）
 // Dock attach side (settings.dock_position: right / left)
@@ -43,13 +42,24 @@ impl DockSide {
 pub struct DockConfig {
     pub enabled: bool,
     pub position: String,
+    // 热区宽度（逻辑像素，settings.dock_hotzone_width，默认 12）
+    // Hotzone width in logical pixels (settings.dock_hotzone_width, default 12)
+    pub hotzone_width: i32,
+    // 展开延迟（毫秒，settings.dock_expand_delay；0 = 立即展开）
+    // Expand delay in ms (settings.dock_expand_delay; 0 = immediate)
+    pub expand_delay_ms: u64,
 }
 
 impl Default for DockConfig {
     fn default() -> Self {
-        // position 与前端 DEFAULT_SETTINGS.dock_position 一致
-        // position matches DEFAULT_SETTINGS.dock_position
-        Self { enabled: false, position: "right".into() }
+        // 与前端 DEFAULT_SETTINGS 对应项一致
+        // Matches the corresponding DEFAULT_SETTINGS entries on the frontend
+        Self {
+            enabled: false,
+            position: "right".into(),
+            hotzone_width: 12,
+            expand_delay_ms: 0,
+        }
     }
 }
 
@@ -88,6 +98,9 @@ fn poll_loop(app: AppHandle) {
     // 已应用的贴靠边：None = 尚未定位，首轮即按当前配置定位
     // Applied attach side: None = not yet positioned; the first tick positions per config
     let mut applied_side: Option<DockSide> = None;
+    // 展开延迟倒计时：上升沿置位，持续停留热区到期才真正展开，提前离开则取消
+    // Expand-delay countdown: set on the rising edge, expands on expiry while dwelling; cancelled on early leave
+    let mut pending_expand: Option<Instant> = None;
 
     loop {
         std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
@@ -96,6 +109,9 @@ fn poll_loop(app: AppHandle) {
         let config = app.state::<Mutex<DockConfig>>().inner().lock().unwrap().clone();
         let side = DockSide::parse(&config.position);
         let scale = dock.scale_factor().unwrap_or(1.0);
+        // 热区宽度：设置值（逻辑像素）× 缩放 → 物理像素，防御性夹取范围
+        // Hotzone width: setting (logical px) × scale → physical px, defensively clamped
+        let hotzone = (config.hotzone_width.clamp(1, 64) as f64 * scale).round() as i32;
 
         // dock_position 变更 → 主显示器上实时换边（docs/PANEL.md §4.2）
         // dock_position changed → reposition live on the primary monitor
@@ -142,11 +158,11 @@ fn poll_loop(app: AppHandle) {
         let Ok(pos) = dock.outer_position() else { continue };
 
         let in_window_y = cy >= pos.y && cy <= pos.y + DOCK_H;
-        // 收起态热区 = 贴靠边的 12px 条带（右贴右条带、左贴左条带）；展开态 = 整窗
-        // Collapsed hotzone = the 12px strip on the attached edge; expanded = the whole window
+        // 收起态热区 = 贴靠边条带（dock_hotzone_width，右贴右条带、左贴左条带）；展开态 = 整窗
+        // Collapsed hotzone = strip on the attached edge (dock_hotzone_width); expanded = the whole window
         let in_strip = match side {
-            DockSide::Right => cx >= pos.x + DOCK_W - HOTZONE_WIDTH && cx <= pos.x + DOCK_W,
-            DockSide::Left => cx >= pos.x && cx <= pos.x + HOTZONE_WIDTH,
+            DockSide::Right => cx >= pos.x + DOCK_W - hotzone && cx <= pos.x + DOCK_W,
+            DockSide::Left => cx >= pos.x && cx <= pos.x + hotzone,
         };
         let in_hotzone = match state {
             DockState::Hidden | DockState::Peeking => in_window_y && in_strip,
@@ -154,14 +170,10 @@ fn poll_loop(app: AppHandle) {
         };
 
         match (state, in_hotzone, was_in_hotzone) {
-            // 上升沿：展开，第一动作 = 关闭穿透（§3.3）
-            // Rising edge: expand; the first action is disabling pass-through (§3.3)
+            // 上升沿：进入展开延迟倒计时（延迟 0 时由下方到期逻辑同轮立即展开）
+            // Rising edge: start the expand-delay countdown (zero delay expands this tick below)
             (DockState::Hidden, true, false) => {
-                let _ = dock.set_ignore_cursor_events(false);
-                pass_through = false;
-                state = DockState::Expanded;
-                last_change = Instant::now();
-                let _ = app.emit("dock:state", "expanded");
+                pending_expand = Some(Instant::now() + Duration::from_millis(config.expand_delay_ms));
             }
             // 收起态不在热区：幂等恢复穿透（§3.2 收起瞬间不立即恢复）
             // Collapsed and outside the hotzone: idempotently restore pass-through (§3.2)
@@ -188,6 +200,25 @@ fn poll_loop(app: AppHandle) {
             last_change = Instant::now();
         }
 
+        // 展开延迟到期判定：持续停留在热区且状态仍为 Hidden 才真正展开
+        // Expand-delay expiry: expand only if still dwelling in the hotzone and still Hidden
+        if let Some(deadline) = pending_expand {
+            if !in_hotzone || state != DockState::Hidden {
+                // 提前离开热区（或状态已被外部改变）→ 取消本次展开意图
+                // Left early (or state changed externally) → cancel the pending expand
+                pending_expand = None;
+            } else if Instant::now() >= deadline {
+                pending_expand = None;
+                // 第一动作 = 关闭穿透（§3.3）
+                // The first action is disabling pass-through (§3.3)
+                let _ = dock.set_ignore_cursor_events(false);
+                pass_through = false;
+                state = DockState::Expanded;
+                last_change = Instant::now();
+                let _ = app.emit("dock:state", "expanded");
+            }
+        }
+
         // 每轮无条件刷新，防外部改状态后卡死（docs/DOCK.md §4）
         // Refresh unconditionally every tick (docs/DOCK.md §4)
         was_in_hotzone = in_hotzone;
@@ -199,10 +230,18 @@ fn poll_loop(app: AppHandle) {
 // 命令必须 pub：generate_handler! 需要模块内可见的 __cmd__ 宏
 // Commands must be pub: generate_handler! needs the __cmd__ macros visible
 #[tauri::command]
-pub fn dock_set_config(config: tauri::State<'_, Mutex<DockConfig>>, enabled: bool, position: String) {
+pub fn dock_set_config(
+    config: tauri::State<'_, Mutex<DockConfig>>,
+    enabled: bool,
+    position: String,
+    hotzone_width: i32,
+    expand_delay_ms: u64,
+) {
     let mut c = config.lock().unwrap();
     c.enabled = enabled;
     c.position = position;
+    c.hotzone_width = hotzone_width;
+    c.expand_delay_ms = expand_delay_ms;
 }
 
 // 插件唤醒分发：Phase 3 仅聚焦主面板；Phase 4 按 window_mode 分发（docs/PLUGINS.md）

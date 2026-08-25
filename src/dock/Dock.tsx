@@ -116,7 +116,7 @@ function DockDot({
 export default function DockApp() {
   const { t } = useTranslation();
   const settings = useSettingsStore((s) => s.settings);
-  const { dock_enabled, dock_visible_items, dock_animation_speed, dock_position } = settings;
+  const { dock_visible_items, dock_animation_speed, dock_position } = settings;
   const side: DockSide = dock_position === "left" ? "left" : "right";
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
@@ -160,16 +160,6 @@ export default function DockApp() {
       un.then((f) => f());
     };
   }, []);
-
-  // Tauri：推送 Dock 设置给 Rust 轮询服务（启用开关 + 贴靠边）
-  // Tauri: push dock settings to the Rust polling service (enable switch + attach side)
-  useEffect(() => {
-    if (!isTauri()) return;
-    invoke("dock_set_config", {
-      enabled: dock_enabled,
-      position: side,
-    }).catch((e) => console.error("dock_set_config 失败 / failed:", e));
-  }, [dock_enabled, side]);
 
   // 浏览器预览：光标离开容器即收起（Tauri 下由 Rust 下降沿负责）
   // Browser preview: collapse when the cursor leaves the container (falling edge in Tauri)

@@ -8,7 +8,6 @@ import { isTauri } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { SearchForm } from "@/components/search-form";
 import {
   Breadcrumb,
@@ -122,7 +121,7 @@ export function TopBar() {
           <PanelLeft />
           <span className="sr-only">{t("topbar.toggleSidebar")}</span>
         </Button>
-        <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+        {/* <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" /> */}
         <PageBreadcrumb />
         <SearchForm className="w-full sm:ml-auto sm:w-auto" />
         <WindowControls />
