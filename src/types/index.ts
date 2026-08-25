@@ -10,8 +10,8 @@
 // Plugin window mode (docs/PLUGINS.md §2.1)
 export type WindowMode = 'embedded' | 'independent' | 'headless'
 
-// manifest.window：独立窗口自定义参数
-// Custom window config from the plugin manifest
+// manifest.window：独立窗口自定义参数（对齐 Tauri 窗口选项，docs/PLUGINS.md §2.2）
+// Custom window config from the plugin manifest (aligned with Tauri window options)
 export interface PluginWindowConfig {
   mode: WindowMode
   title?: string
@@ -21,6 +21,22 @@ export interface PluginWindowConfig {
   minHeight?: number
   resizable?: boolean
   alwaysOnTop?: boolean
+  // 透明背景：窗口与页面 html/body 双透明（Linux X11 无合成器时退化为黑底）
+  // Transparent: window + html/body both transparent (black on X11 without a compositor)
+  transparent?: boolean
+  // 无边框（隐藏标题栏）；配合 startDragging 通道实现自绘拖拽区
+  // Frameless (hides the title bar); pair with the startDragging channel for custom drag areas
+  decorations?: boolean
+  // 不在任务栏显示（macOS 会同时从 Cmd-Tab 隐藏）
+  // Hide from the taskbar (also hides from Cmd-Tab on macOS)
+  skipTaskbar?: boolean
+  // 窗口投影（仅 Windows/Linux 生效，macOS 忽略）
+  // Window shadow (Windows/Linux only; ignored on macOS)
+  shadow?: boolean
+  // 居中创建（默认 true）
+  // Center on creation (default true)
+  center?: boolean
+  fullscreen?: boolean
 }
 
 // 工作流能力声明（manifest.workflow）

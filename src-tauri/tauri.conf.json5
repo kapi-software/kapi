@@ -76,6 +76,16 @@
             "core:window:allow-start-dragging",
           ],
         },
+        {
+          // 插件独立窗口壳（label 形如 plugin-com_kapi_sample_plugin-a，glob 匹配）
+          // Plugin window shells (labels like plugin-com_kapi_sample_plugin-a; glob-matched)
+          // 壳需读 window_config（sql:default 的 load/select）；应用自有命令（plugin_bridge）不经 ACL
+          // The shell reads window_config (sql:default load/select); app commands bypass the ACL
+          identifier: "plugin-window",
+          description: "插件独立窗口壳的能力 / Capability for plugin window shells",
+          windows: ["plugin-*"],
+          permissions: ["core:default", "sql:default"],
+        },
       ],
     },
   },

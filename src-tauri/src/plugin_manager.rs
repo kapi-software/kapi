@@ -18,7 +18,7 @@ const DB_KEY: &str = "sqlite:kapi.db";
 // Valid window modes (docs/PLUGINS.md §2.1)
 const MODES: [&str; 3] = ["embedded", "independent", "headless"];
 
-// manifest.window：独立窗口自定义参数（缺省字段由启动时回退默认值）
+// manifest.window：独立窗口自定义参数（缺省字段由启动时回退默认值，对齐 Tauri 窗口选项）
 // manifest.window: custom independent-window params (launch falls back for missing fields)
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +31,18 @@ pub struct ManifestWindow {
     pub min_height: Option<f64>,
     pub resizable: Option<bool>,
     pub always_on_top: Option<bool>,
+    // 透明背景：需窗口与页面双透明；Linux X11 无合成器时退化为黑底
+    // Transparent: needs window + page transparency; black on X11 without a compositor
+    pub transparent: Option<bool>,
+    // 无边框（隐藏标题栏）；默认 true / frameless (hides the title bar); default true
+    pub decorations: Option<bool>,
+    // 不在任务栏显示；默认 false / hide from the taskbar; default false
+    pub skip_taskbar: Option<bool>,
+    // 窗口投影（仅 Windows/Linux）；默认 true / shadow (Windows/Linux only); default true
+    pub shadow: Option<bool>,
+    // 居中创建；默认 true / center on creation; default true
+    pub center: Option<bool>,
+    pub fullscreen: Option<bool>,
 }
 
 // manifest.json：安装校验所需字段（kapi_version / workflow / permissions 原样入库）
@@ -151,7 +163,7 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 // label 仅用于窗口查找 / 聚焦 / 关闭的确定性映射；插件 id 权威来源是窗口 URL 的路由参数
 // The label is only a deterministic handle for lookup/focus/close; the authoritative
 // plugin id travels in the window URL route
-fn plugin_window_label(plugin_id: &str) -> String {
+pub(crate) fn plugin_window_label(plugin_id: &str) -> String {
     format!("plugin-{}", plugin_id.replace('.', "_"))
 }
 
@@ -159,7 +171,7 @@ fn plugin_window_label(plugin_id: &str) -> String {
 // Shared SQLite pool: created by the frontend Database.load (tauri-plugin-sql state)
 // 插件未导出 sqlite() 访问器，直接匹配枚举变体；SqlitePool 为 Arc 句柄，克隆廉价
 // The plugin exports no sqlite() accessor, so match the variant; SqlitePool is an Arc handle
-async fn sqlite_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
+pub(crate) async fn sqlite_pool(app: &AppHandle) -> Result<sqlx::SqlitePool, String> {
     let instances = app.state::<DbInstances>();
     // tokio RwLock：await 取读锁（无中毒语义）；守卫显式绑定，确保 await 后即可释放
     // tokio RwLock: await the read lock (no poisoning); the named guard drops right after the clone
@@ -396,8 +408,8 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
     }
 }
 
-// 创建插件独立窗口：参数取自 manifest.window，缺省 800×600 可缩放居中
-// Create the independent window: params from manifest.window; defaults 800x600, resizable, centered
+// 创建插件独立窗口：参数取自 manifest.window（对齐 Tauri 窗口选项），缺省 800×600 可缩放居中
+// Create the independent window: params from manifest.window (Tauri-aligned); defaults 800x600
 fn create_plugin_window(
     app: &AppHandle,
     plugin_id: &str,
@@ -416,7 +428,20 @@ fn create_plugin_window(
         .inner_size(cfg.width.unwrap_or(800.0), cfg.height.unwrap_or(600.0))
         .resizable(cfg.resizable.unwrap_or(true))
         .always_on_top(cfg.always_on_top.unwrap_or(false))
-        .center();
+        .decorations(cfg.decorations.unwrap_or(true))
+        .skip_taskbar(cfg.skip_taskbar.unwrap_or(false))
+        .shadow(cfg.shadow.unwrap_or(true))
+        .fullscreen(cfg.fullscreen.unwrap_or(false));
+    // 透明：macOS 由 macos-private-api feature 门控（已启用），条件调用保持语义清晰
+    // Transparent: gated by the macos-private-api feature on macOS (enabled); conditional call
+    if cfg.transparent.unwrap_or(false) {
+        builder = builder.transparent(true);
+    }
+    // 居中：保持历史默认（此前无条件居中）
+    // Centering: preserves the historical default (previously unconditional)
+    if cfg.center.unwrap_or(true) {
+        builder = builder.center();
+    }
     if let (Some(w), Some(h)) = (cfg.min_width, cfg.min_height) {
         builder = builder.min_inner_size(w, h);
     }
@@ -505,6 +530,30 @@ mod tests {
     fn wasm_entry_recorded() {
         let plan = plan_install(&manifest_json(""), true, true).unwrap();
         assert_eq!(plan.wasm_path.as_deref(), Some("main.wasm"));
+    }
+
+    #[test]
+    fn parses_tauri_aligned_window_options() {
+        // Tauri 对齐窗口选项：camelCase 解析 + window_config 快照保留新键
+        // Tauri-aligned window options: camelCase parsing + snapshot keeps the new keys
+        let json = r#"{
+            "id": "com.example.demo", "name": "Demo", "version": "1.0.0",
+            "window": {"mode": "independent", "transparent": true, "decorations": false,
+                        "skipTaskbar": true, "shadow": false, "center": false, "fullscreen": false}
+        }"#;
+        let plan = plan_install(json, true, false).unwrap();
+        let w = plan.manifest.window.unwrap();
+        assert_eq!(w.transparent, Some(true));
+        assert_eq!(w.decorations, Some(false));
+        assert_eq!(w.skip_taskbar, Some(true));
+        assert_eq!(w.shadow, Some(false));
+        assert_eq!(w.center, Some(false));
+        assert_eq!(w.fullscreen, Some(false));
+        // 快照序列化回 camelCase，前端 PluginWindowConfig 直接可用
+        // The snapshot serializes back to camelCase, directly usable by the frontend
+        let wc = plan.window_config.unwrap();
+        assert!(wc.contains("\"skipTaskbar\""));
+        assert!(wc.contains("\"transparent\""));
     }
 
     // ---- copy_dir_recursive：目录复制 / dir copying ----
