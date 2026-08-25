@@ -29,6 +29,8 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] PluginHost postMessage 桥接（协议处理纯函数化 + 来源校验 + Tauri 门控，2026-08-25）
 - [x] 桥接 API 与权限模型（plugin_bridge 命令：PermissionGuard 默认拒绝 + storage/clipboard/http/events/log/window 通道；plugin.invoke 待 wasmtime，events.on 待 SDK，2026-08-25）
 - [x] 独立窗口定制（manifest.window 对齐 Tauri 窗口选项：transparent/decorations/skipTaskbar/shadow/center/fullscreen + 透明壳加载门控，2026-08-25）
+- [x] wasmtime 运行时（wasmtime 48 + WASI p1：ABI v1 / 单宿主导入 kapi_host_call 复用桥接分发 / fuel 10 亿 + 5s epoch + 64MiB 内存限制 / 模块缓存与 evict；pluginD 全链路示例 + fixture 单测，2026-08-25）
+- [x] headless 启动（立即执行默认动作：run 优先 → 首个 action，成败写 system_logs；Phase 6 工作流接管编排，2026-08-25）
 
 ## 3. 待开发清单
 
@@ -44,7 +46,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] PluginHost（iframe 宿主 + postMessage 桥接已接通：/plugin/:id 内嵌 + /plugin-window/:id 独立壳共用，2026-08-25）
 - [x] 插件独立窗口（manifest 自定义窗口参数，重复点击聚焦，2026-08-25；窗口选项扩展对齐 Tauri：transparent/decorations/skipTaskbar/shadow/center/fullscreen，2026-08-25）
 - [x] 插件管理器（本地导入安装/卸载/启停/模式切换/排序，2026-08-25；市场安装属 Phase 5）
-- [ ] wasmtime 运行时（kapi_invoke ABI + 宿主函数 + fuel 限制）
+- [x] wasmtime 运行时（kapi_invoke ABI + 宿主导入 + fuel/epoch/内存限制，2026-08-25）
 - [x] 桥接 API 与权限模型（plugin_bridge + PermissionGuard 默认拒绝；kapi:plugin.invoke 待 wasmtime、kapi:events.on 待 SDK，2026-08-25）
 - [ ] @kapi/plugin-sdk（插件前端 SDK）与 kapi-plugin-sdk（WASM Rust SDK）
 - [ ] 插件市场（GitHub API + 安装流程）

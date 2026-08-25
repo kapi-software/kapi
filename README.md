@@ -17,7 +17,7 @@ A Tauri-based plugin-oriented desktop application with unified plugin management
 | **Main Panel** | Navigation sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area. Built with React 19 + shadcn/ui. | ✅ Done |
 | **Dock Sidebar** | Arc-shaped launcher on the right screen edge with hotzone polling. **Wakes plugins only** (dispatch lives in Rust). | ✅ Done |
 | **System Tray** | Resident app: close-to-tray, panel / settings / quit menu. | ✅ Done |
-| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. `kapi-plugin://` protocol, install/uninstall/enable/mode switch, embedded & independent window hosts, postMessage bridge with a default-deny permission model, Tauri-aligned window customization (transparent / frameless / ...). WASM runtime & plugin SDKs pending. | 🔨 In progress |
+| **Plugin System** | WASM-sandboxed logic (wasmtime 48 + WASI p1: ABI v1, fuel + 5s epoch + memory caps) + Web UI. `kapi-plugin://` protocol, install/uninstall/enable/mode switch, embedded & independent window hosts, postMessage bridge with a default-deny permission model shared by UI and WASM, Tauri-aligned window customization (transparent / frameless / ...), headless launch runs the default action. Plugin SDKs (`@kapi/plugin-sdk`, `kapi-plugin-sdk`) pending. | 🔨 In progress |
 | **Workflow System** | Trigger-based DAG step graphs for cross-plugin data flow (e.g., clipboard watch → beautify & save → screenshot). | Phase 6 |
 | **Local Database** | SQLite via `tauri-plugin-sql`. Single migration entry point on the Rust side. | ✅ Done |
 
@@ -96,7 +96,7 @@ pnpm tauri build
 │   │   └── plugin_manager.rs   # Install / uninstall / launch dispatch
 │   └── tauri.conf.json5        # Tauri configuration (JSON5, inline capabilities)
 │
-├── plugins/                    # Sample plugin fixtures (pluginA / pluginB / pluginC)
+├── plugins/                    # Sample plugin fixtures (pluginA / pluginB / pluginC / pluginD)
 └── docs/                       # Design documentation (Chinese)
 ```
 

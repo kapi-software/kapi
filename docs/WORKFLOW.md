@@ -86,7 +86,11 @@ impl WorkflowEngine {
         // 4. 全部完成 → 更新 run status/finished_at，返回 RunResult
     }
 }
+```
 
+> **已就绪依赖**：`WasmRuntime::invoke_action(pool, plugin_id, action, payload)` 已随 Phase 4 落地（`src-tauri/src/wasm_runtime.rs`，含 fuel/epoch/内存沙箱与权限守卫），即上述 `wasm.invoke_action` 的正式入口——Phase 6 引擎实现时直接复用，无需再写 WASM 调用层。插件向工作流暴露的 action 面即 manifest.workflow.actions（示例见 `plugins/pluginD`）。
+
+```rust
 // 节点执行上下文：trigger 原始数据 + 各节点已产出输出
 struct WorkflowContext {
     trigger: Value,
