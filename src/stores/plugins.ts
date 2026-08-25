@@ -32,7 +32,10 @@ export const usePluginsStore = create<PluginsState>((set, get) => ({
   loading: false,
 
   async load() {
-    set({ loading: true });
+    // 已有数据时静默刷新（不回退骨架屏，避免模式切换/启停/排序时整页闪动）；仅首次加载显示 loading
+    // Silent revalidation once data exists (no skeleton fallback, so mode switches /
+    // toggles / reordering never flash the whole page); loading shows on the first load only
+    if (get().plugins.length === 0) set({ loading: true });
     try {
       await initDb();
       set({ plugins: await pluginDb.getAll() });
