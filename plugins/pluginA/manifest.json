@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "kapi_version": "^1.0.0",
   "author": "Kapi",
-  "description": "最小可安装示例：验证 kapi-plugin:// 协议与内嵌运行链路",
+  "description": "最小可安装示例：验证 kapi-plugin:// 协议、内嵌运行与桥接存储链路",
   "category": "tool",
+  "permissions": ["storage:read", "storage:write"],
   "window": {
     "mode": "embedded"
   }

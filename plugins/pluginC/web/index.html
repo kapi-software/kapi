@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>透明小组件</title>
+    <style>
+      /* 透明窗口：html/body 必须双透明，才能透出窗口投影与桌面 */
+      /* Transparent window: html/body must stay see-through for the shadow and desktop */
+      :root { color-scheme: light dark; }
+      html,
+      body {
+        background: transparent;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: #fff;
+        user-select: none;
+      }
+      .widget {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.88), rgba(139, 92, 246, 0.78));
+        backdrop-filter: blur(10px);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        /* 自绘标题区：按住即拖拽整窗（kapi:window.startDragging） */
+        /* Custom title area: press and drag moves the window (kapi:window.startDragging) */
+        cursor: move;
+        flex: 1;
+      }
+      button {
+        font-size: 12px;
+        padding: 4px 12px;
+        border: none;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #6366f1;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #close {
+        padding: 4px 9px;
+        background: rgba(0, 0, 0, 0.3);
+        color: #fff;
+      }
+      #status {
+        font-size: 11px;
+        opacity: 0.85;
+        min-height: 1.2em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="widget">
+      <div class="row">
+        <h1 id="drag">示例插件 C · 按住拖拽</h1>
+        <button id="close" title="kapi:window.close">✕</button>
+      </div>
+      <div class="row">
+        <span style="font-size: 12px">透明 · 无边框 · 置顶 · 跳过任务栏</span>
+        <button id="log">写日志 / Log</button>
+      </div>
+      <div id="status"></div>
+    </div>
+    <script>
+      // 裸桥接 RPC：与 pluginA 同款（@kapi/plugin-sdk 接入后由 SDK 替换，当前刻意重复）
+      // Raw bridge RPC: same as pluginA (replaced by @kapi/plugin-sdk later; duplication intended)
+      let seq = 0;
+      const pending = new Map();
+      function call(channel, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++seq;
+          pending.set(id, { resolve, reject });
+          parent.postMessage({ id, channel, payload }, "*");
+        });
+      }
+      window.addEventListener("message", (e) => {
+        const msg = e.data;
+        if (!msg || typeof msg !== "object" || !pending.has(msg.id)) return;
+        const { resolve, reject } = pending.get(msg.id);
+        pending.delete(msg.id);
+        msg.ok ? resolve(msg.data) : reject(new Error(msg.error || "bridge error"));
+      });
+
+      const status = document.getElementById("status");
+      function report(promise, okText) {
+        promise
+          .then(() => (status.textContent = okText))
+          .catch((err) => (status.textContent = String(err.message || err)));
+      }
+
+      // 无边框窗口唯一移动方式：按住标题区拖拽（按钮点击不触发）
+      // The only way to move a frameless window: drag the title area (buttons excluded)
+      document.getElementById("drag").addEventListener("mousedown", () => {
+        report(call("kapi:window.startDragging", {}), "");
+      });
+      document.getElementById("close").addEventListener("click", () => {
+        report(call("kapi:window.close", {}), "");
+      });
+      document.getElementById("log").addEventListener("click", () => {
+        // 经 kapi:log.info 写入 system_logs（主面板日志页可查 source = plugin:<id>）
+        // kapi:log.info appends to system_logs (logs page shows source = plugin:<id>)
+        report(
+          call("kapi:log.info", { message: "hello from plugin C", data: { at: "widget" } }),
+          "已写入系统日志 / logged",
+        );
+      });
+    </script>
+  </body>
+</html>
