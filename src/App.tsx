@@ -1,6 +1,6 @@
 // 应用根组件：窗口分流、主题与语言应用、主面板布局与路由
 // Root component: window routing, theme & language application, panel layout and routes
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@/lib/tauri";
@@ -23,7 +23,9 @@ import Settings from "@/pages/Settings";
 // Panel layout: official Sidebar (inset variant) + SidebarInset content (shadcn sidebar-07)
 function PanelLayout() {
   return (
-    <SidebarProvider>
+    // 覆盖官方默认 16rem：稍微收窄侧边栏（宽度仅此处声明，官方组件不改）
+    // Override the official 16rem default: a slightly narrower sidebar (declared only here, vendored file untouched)
+    <SidebarProvider style={{ "--sidebar-width": "14rem" } as CSSProperties}>
       <AppSidebar />
       {/* inset 变体在 md+ 有 m-2 外边距：高度须扣除 1rem，否则窗口级出现常驻滚动条 */}
       {/* The inset variant adds m-2 margins on md+: subtract 1rem or the window keeps a permanent scrollbar */}
