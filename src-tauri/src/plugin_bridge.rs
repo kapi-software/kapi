@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::plugin_manager::{plugin_window_label, sqlite_pool};
 use crate::plugin_protocol::is_valid_plugin_id;
@@ -112,6 +112,12 @@ struct LogPayload {
 #[derive(Deserialize)]
 struct WindowSetTitlePayload {
     title: String,
+}
+
+#[derive(Deserialize)]
+struct PluginInvokePayload {
+    action: String,
+    payload: Option<Value>,
 }
 
 // payload 反序列化：统一报 InvalidPayload
@@ -475,6 +481,23 @@ fn ensure_own_window(window: &WebviewWindow, plugin_id: &str) -> Result<(), Stri
     }
 }
 
+// 动作名：与事件类型同字符集 / action names share the event-type charset
+fn validate_action(action: &str) -> Result<(), String> {
+    let n = action.chars().count();
+    let valid = n > 0
+        && n <= MAX_EVENT_TYPE_LEN
+        && action
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "InvalidPayload: action must be 1..={MAX_EVENT_TYPE_LEN} chars of [A-Za-z0-9._-]"
+        ))
+    }
+}
+
 // ---- 命令与分发 / command and dispatch ----
 
 // 通道分发：UI 桥（plugin_bridge 命令）与 WASM 宿主导入（kapi_host_call）共用的唯一权限闸与路由
@@ -566,11 +589,16 @@ pub async fn plugin_bridge(
             window.start_dragging().map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
-        // WASM 运行时属下一轮（wasm_runtime.rs）；通道先占位并返回稳定错误码
-        // The WASM runtime lands next round (wasm_runtime.rs); stable error for now
-        "kapi:plugin.invoke" => Err(
-            "NotImplemented: kapi:plugin.invoke requires the WASM runtime".into(),
-        ),
+        // 调用自身 WASM 入口（无需权限声明）：payload {action, payload?}
+        // Invoke the plugin's own WASM entry (no permission needed): payload {action, payload?}
+        "kapi:plugin.invoke" => {
+            let p: PluginInvokePayload = parse_payload(payload)?;
+            validate_action(&p.action)?;
+            let runtime = app.state::<crate::wasm_runtime::WasmRuntime>();
+            runtime
+                .invoke_action(&pool, &plugin_id, &p.action, &p.payload.unwrap_or(Value::Null))
+                .await
+        }
         // 其余通道全部委托共享分发（storage/clipboard/http/events/log）
         // Everything else delegates to the shared dispatch (storage/clipboard/http/events/log)
         _ => dispatch_channel(&pool, &ctx.guard, &plugin_id, &channel, payload).await,

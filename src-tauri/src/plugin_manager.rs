@@ -304,6 +304,11 @@ pub async fn plugin_install(app: AppHandle, source_dir: String) -> Result<Value,
         ));
     }
 
+    // 重装自愈路径可能替换旧 wasm：清掉编译缓存，确保下次按新文件编译
+    // The self-healing reinstall may replace the wasm; evict the compiled cache
+    app.state::<crate::wasm_runtime::WasmRuntime>()
+        .evict(&plan.manifest.id);
+
     let row = sqlx::query("SELECT * FROM plugins WHERE id = ?")
         .bind(&plan.manifest.id)
         .fetch_one(&pool)
@@ -331,6 +336,10 @@ pub async fn plugin_uninstall(app: AppHandle, plugin_id: String) -> Result<(), S
         let _ = win.close();
     }
 
+    // 卸载即清编译缓存（同名重装不会命中旧模块）
+    // Uninstall evicts the compiled cache (a same-id reinstall never hits the old module)
+    app.state::<crate::wasm_runtime::WasmRuntime>().evict(&plugin_id);
+
     sqlx::query("DELETE FROM plugins WHERE id = ?")
         .bind(&plugin_id)
         .execute(&pool)
@@ -355,7 +364,8 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
     let pool = sqlite_pool(&app).await?;
 
     let row = sqlx::query(
-        "SELECT window_mode, window_config, is_enabled FROM plugins WHERE id = ? AND is_installed = 1",
+        "SELECT window_mode, window_config, wasm_path, manifest, is_enabled
+         FROM plugins WHERE id = ? AND is_installed = 1",
     )
     .bind(&plugin_id)
     .fetch_optional(&pool)
@@ -399,13 +409,73 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
                 create_plugin_window(&app, &plugin_id, config_json.as_deref())
             }
         }
-        // headless：WASM 运行时属 Phase 4 后续步骤（wasm_runtime.rs）
-        // headless: the WASM runtime is a later Phase 4 step (wasm_runtime.rs)
-        _ => Err(
-            "headless 模式依赖 WASM 运行时（Phase 4 后续步骤）/ headless mode requires the WASM runtime (later in Phase 4)"
-                .into(),
-        ),
+        // headless：立即执行一次默认动作（Phase 6 工作流引擎接管触发编排前）
+        // headless: run the default action once (until the Phase 6 workflow engine takes over)
+        _ => {
+            let wasm_path: String = row
+                .try_get::<Option<String>, _>("wasm_path")
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "headless 模式需要 main.wasm / headless mode requires main.wasm".to_string())?;
+            let manifest: String = row
+                .try_get::<String, _>("manifest")
+                .map_err(|e| e.to_string())?;
+            let action = pick_headless_action(&manifest);
+
+            let runtime = app.state::<crate::wasm_runtime::WasmRuntime>();
+            let started = std::time::Instant::now();
+            let outcome = runtime.invoke_action(&pool, &plugin_id, &action, &json!({})).await;
+            let duration_ms = started.elapsed().as_millis() as u64;
+
+            // 成败都写日志页（source = plugin:<id>）；失败原样上抛给前端 toast
+            // Both outcomes land in the logs page (source = plugin:<id>); errors propagate to the toast
+            match outcome {
+                Ok(result) => {
+                    crate::plugin_bridge::write_system_log(
+                        &pool,
+                        "info",
+                        &format!("headless action '{action}' completed"),
+                        &format!("plugin:{plugin_id}"),
+                        Some(json!({ "action": action, "durationMs": duration_ms, "result": result })),
+                    )
+                    .await?;
+                    let _ = wasm_path; // 语义标记：已确认存在 WASM 入口 / WASM entry confirmed above
+                    Ok(())
+                }
+                Err(err) => {
+                    let _ = crate::plugin_bridge::write_system_log(
+                        &pool,
+                        "error",
+                        &err,
+                        &format!("plugin:{plugin_id}"),
+                        Some(json!({ "action": action, "durationMs": duration_ms, "error": err })),
+                    )
+                    .await;
+                    Err(err)
+                }
+            }
+        }
     }
+}
+
+// headless 默认动作：workflow.actions 中名为 run 的优先，否则首个 action，缺省字面量 "run"
+// The headless default action: workflow.actions named "run" wins, then the first action, else "run"
+pub(crate) fn pick_headless_action(manifest_json: &str) -> String {
+    // 嵌套 fn 规避闭包引用生命周期推断 / a nested fn sidesteps closure lifetime inference
+    fn name_of(v: &Value) -> Option<&str> {
+        v.get("name").and_then(Value::as_str)
+    }
+    let value: Value = serde_json::from_str(manifest_json).unwrap_or(Value::Null);
+    let Some(actions) = value
+        .get("workflow")
+        .and_then(|w| w.get("actions"))
+        .and_then(Value::as_array)
+    else {
+        return "run".into();
+    };
+    if actions.iter().any(|v| name_of(v) == Some("run")) {
+        return "run".into();
+    }
+    actions.iter().find_map(name_of).unwrap_or("run").to_string()
 }
 
 // 创建插件独立窗口：参数取自 manifest.window（对齐 Tauri 窗口选项），缺省 800×600 可缩放居中
@@ -594,6 +664,21 @@ mod tests {
         let root = temp_dir_for("copy-missing");
         assert!(copy_dir_recursive(&root.join("nope"), &root.join("dst")).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- pick_headless_action：headless 默认动作 / default headless action ----
+
+    #[test]
+    fn headless_action_prefers_run_then_first() {
+        // run 优先 / a declared run wins
+        let with_run = r#"{"workflow":{"actions":[{"name":"format"},{"name":"run"}]}}"#;
+        assert_eq!(pick_headless_action(with_run), "run");
+        // 无 run → 首个 action / no run -> the first action
+        let no_run = r#"{"workflow":{"actions":[{"name":"format"},{"name":"save"}]}}"#;
+        assert_eq!(pick_headless_action(no_run), "format");
+        // 无 workflow / actions → 字面量 "run" / no workflow or actions -> the literal "run"
+        assert_eq!(pick_headless_action(r#"{"id":"x"}"#), "run");
+        assert_eq!(pick_headless_action("{ bad json"), "run");
     }
 
     #[test]
