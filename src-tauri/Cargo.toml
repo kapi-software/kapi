@@ -42,6 +42,24 @@ arboard = "3"
 # Note: features were renamed in 0.13 (rustls-tls -> rustls + webpki-roots)
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots"] }
 url = "2"
+# WASM 运行时（docs/PLUGINS.md §5）：cranelift + wat（单测用 WAT）；与 wasmtime-wasi 严格同版本
+# WASM runtime (docs/PLUGINS.md §5): cranelift + wat (for WAT unit tests); must match wasmtime-wasi
+# feature 裁剪去掉 cache/profiling/coredump/winch/gc 等，缩短 Windows 首编（core wasm 无需 GC）
+# Trimmed features (no cache/profiling/coredump/winch/gc) shorten the first Windows build
+wasmtime = { version = "48.0.1", default-features = false, features = [
+    "cranelift",
+    "runtime",
+    "std",
+    "wat",
+    "anyhow",
+    "parallel-compilation",
+] }
+# WASI preview1：wasm32-wasip1 产物的 std 依赖（无 preopen / 无网络 / 空环境）
+# WASI preview1: required by wasm32-wasip1 std (no preopens / no network / empty env)
+wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p1"] }
+# WASM 执行放 spawn_blocking，宿主函数内经 Handle::block_on 桥接异步 DB/HTTP；macros 供 #[tokio::test]
+# WASM runs in spawn_blocking; host functions bridge async DB/HTTP via Handle::block_on; macros for tests
+tokio = { version = "1", features = ["rt", "macros"] }
 
 # Dock 光标轮询（docs/DOCK.md §4）：仅 Windows 需要 Win32 API
 # Dock cursor polling (docs/DOCK.md §4): Win32 API needed on Windows only

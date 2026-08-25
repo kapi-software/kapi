@@ -6,6 +6,7 @@ mod plugin_bridge;
 mod plugin_manager;
 mod plugin_protocol;
 mod tray;
+mod wasm_runtime;
 
 use std::sync::Mutex;
 
@@ -27,6 +28,9 @@ pub fn run() {
         // Dock polling config + tray language (frontend pushes changes via commands)
         .manage(Mutex::new(dock::DockConfig::default()))
         .manage(tray::TrayState::default())
+        // WASM 运行时：wasmtime 沙箱 + 模块缓存 + epoch ticker（docs/PLUGINS.md §5）
+        // WASM runtime: the wasmtime sandbox, module cache and epoch ticker
+        .manage(wasm_runtime::WasmRuntime::new())
         // kapi-plugin:// 协议：插件 web/ 静态资源服务（docs/ARCHITECTURE.md §3.4）
         // kapi-plugin:// protocol: plugin web/ static asset serving (docs/ARCHITECTURE.md §3.4)
         .register_uri_scheme_protocol(plugin_protocol::SCHEME, |ctx, request| {
