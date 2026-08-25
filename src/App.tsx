@@ -23,9 +23,16 @@ import Settings from "@/pages/Settings";
 // Panel layout: official Sidebar (inset variant) + SidebarInset content (shadcn sidebar-07)
 function PanelLayout() {
   return (
-    // 覆盖官方默认 16rem：稍微收窄侧边栏（宽度仅此处声明，官方组件不改）
-    // Override the official 16rem default: a slightly narrower sidebar (declared only here, vendored file untouched)
-    <SidebarProvider style={{ "--sidebar-width": "14rem" } as CSSProperties}>
+    // 覆盖官方默认宽度：展开 16rem→12rem，图标态 3rem→2rem（仅此处声明，官方组件不改）
+    // Override official widths: expanded 16rem→12rem, icon rail 3rem→2rem (declared only here, vendored file untouched)
+    <SidebarProvider
+      style={
+        {
+          "--sidebar-width": "12rem",
+          "--sidebar-width-icon": "2rem",
+        } as CSSProperties
+      }
+    >
       <AppSidebar />
       {/* inset 变体在 md+ 有 m-2 外边距：高度须扣除 1rem，否则窗口级出现常驻滚动条 */}
       {/* The inset variant adds m-2 margins on md+: subtract 1rem or the window keeps a permanent scrollbar */}
