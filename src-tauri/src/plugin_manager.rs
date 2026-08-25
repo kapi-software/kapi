@@ -18,12 +18,11 @@ const DB_KEY: &str = "sqlite:kapi.db";
 // Valid window modes (docs/PLUGINS.md §2.1)
 const MODES: [&str; 3] = ["embedded", "independent", "headless"];
 
-// manifest.window：独立窗口自定义参数（缺省字段由启动时回退默认值，对齐 Tauri 窗口选项）
-// manifest.window: custom independent-window params (launch falls back for missing fields)
+// 窗口参数（不含 mode）：legacy window 字段与 windows[] 条目共用，对齐 Tauri 窗口选项
+// Window params (mode excluded): shared by the legacy window field and windows[] entries
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ManifestWindow {
-    pub mode: Option<String>,
+pub struct ManifestWindowParams {
     pub title: Option<String>,
     pub width: Option<f64>,
     pub height: Option<f64>,
@@ -45,6 +44,27 @@ pub struct ManifestWindow {
     pub fullscreen: Option<bool>,
 }
 
+// manifest.window：legacy 单形态声明（mode 与参数扁平同层；缺省字段由启动时回退默认值）
+// manifest.window: the legacy single-shape declaration (mode flattened with params)
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestWindow {
+    pub mode: Option<String>,
+    #[serde(flatten)]
+    pub params: ManifestWindowParams,
+}
+
+// manifest.windows[]：多形态声明（mode + entry + 参数）；entry 相对 web/，如 "index.html"
+// manifest.windows[]: multi-shape declaration (mode + entry + params); entry is web/-relative
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestWindowEntry {
+    pub mode: Option<String>,
+    pub entry: Option<String>,
+    #[serde(flatten)]
+    pub params: ManifestWindowParams,
+}
+
 // manifest.json：安装校验所需字段（kapi_version / workflow / permissions 原样入库）
 // manifest.json: fields needed for install validation (other keys stored verbatim)
 #[derive(Debug, Clone, Deserialize)]
@@ -58,6 +78,97 @@ pub struct Manifest {
     pub icon: Option<String>,
     pub category: Option<String>,
     pub window: Option<ManifestWindow>,
+    pub windows: Option<Vec<ManifestWindowEntry>>,
+}
+
+// 解析后的单个形态：入口文件（相对 web/）+ 窗口参数
+// One resolved shape: the entry file (web/-relative) plus window params
+#[derive(Debug, Default, Clone)]
+pub struct ResolvedWindow {
+    pub entry: String,
+    pub params: ManifestWindowParams,
+}
+
+// 插件声明支持的形态：windows 数组优先，legacy window 回退；headless = 有 wasm 入口
+// The plugin's declared shapes: the windows array wins, the legacy window field is the
+// fallback; headless support equals having a wasm entry
+#[derive(Debug, Default)]
+pub struct SupportedWindows {
+    pub embedded: Option<ResolvedWindow>,
+    pub independent: Option<ResolvedWindow>,
+    pub headless: bool,
+}
+
+// 形态支持解析（纯函数）：windows[] 逐条入位（每 mode 至多一条）；无数组时按 legacy
+// window.mode（缺省 embedded）单形态、入口固定 index.html；无 web 入口则无窗口形态
+// Shape resolution (pure): windows[] entries slot in (at most one per mode); without the
+// array the legacy window.mode (default embedded) yields a single index.html shape;
+// no web entry means no window shapes at all
+pub fn resolve_supported_windows(
+    manifest_json: &str,
+    has_web: bool,
+    has_wasm: bool,
+) -> Result<SupportedWindows, String> {
+    let manifest: Manifest = serde_json::from_str(manifest_json)
+        .map_err(|e| format!("manifest.json 解析失败 / invalid manifest.json: {e}"))?;
+    let mut out = SupportedWindows { headless: has_wasm, ..Default::default() };
+
+    if let Some(entries) = manifest.windows {
+        for entry in entries {
+            let mode = entry.mode.clone().unwrap_or_else(|| "embedded".into());
+            let resolved = ResolvedWindow {
+                entry: entry.entry.clone().unwrap_or_else(|| "index.html".into()),
+                params: entry.params,
+            };
+            match mode.as_str() {
+                "embedded" if out.embedded.is_none() => out.embedded = Some(resolved),
+                "independent" if out.independent.is_none() => out.independent = Some(resolved),
+                // headless 由 main.wasm 决定，不进 windows[] / headless comes from main.wasm only
+                "headless" => {
+                    return Err("windows[] 不支持 headless（由 main.wasm 决定）/ headless is not a windows[] mode (decided by main.wasm)".into())
+                }
+                other => {
+                    return Err(format!(
+                        "windows[] mode 非法或重复 / invalid or duplicate windows[] mode: {other}"
+                    ))
+                }
+            }
+        }
+    } else {
+        // legacy：单一形态（mode 缺省 embedded），入口固定 index.html
+        // legacy: a single shape (mode defaults to embedded) with the fixed index.html entry
+        let window = manifest.window.unwrap_or_default();
+        let resolved =
+            ResolvedWindow { entry: "index.html".into(), params: window.params };
+        match window.mode.as_deref().unwrap_or("embedded") {
+            "embedded" => out.embedded = Some(resolved),
+            "independent" => out.independent = Some(resolved),
+            // headless 声明不产生窗口形态 / a headless declaration yields no window shape
+            _ => {}
+        }
+    }
+
+    // headless-only（无 web 入口）：两种窗口形态都不存在
+    // headless-only (no web entry): neither window shape exists
+    if !has_web {
+        out.embedded = None;
+        out.independent = None;
+    }
+    Ok(out)
+}
+
+// entry 文件存在性核验：windows[] 每个形态的入口必须真实存在（命令侧，plan_install 保持纯函数）
+// Entry file existence: every declared shape's entry must exist (command-side; plan_install stays pure)
+fn ensure_entries_exist(src: &Path, supported: &SupportedWindows) -> Result<(), String> {
+    for resolved in [&supported.embedded, &supported.independent].into_iter().flatten() {
+        if !src.join("web").join(&resolved.entry).is_file() {
+            return Err(format!(
+                "windows[].entry 文件不存在 / missing entry file: web/{}",
+                resolved.entry
+            ));
+        }
+    }
+    Ok(())
 }
 
 // 安装计划：manifest 校验与入口推导的纯函数产物（无 IO，便于单测）
@@ -106,13 +217,33 @@ pub fn plan_install(
         );
     }
 
-    // 运行模式：显式声明优先，否则按入口推导（有 UI → embedded，纯逻辑 → headless）
-    // Window mode: explicit wins; otherwise derived from entries (UI → embedded, logic-only → headless)
-    let window_mode = manifest
-        .window
-        .as_ref()
-        .and_then(|w| w.mode.clone())
-        .unwrap_or_else(|| if has_web { "embedded".into() } else { "headless".into() });
+    // 形态支持解析 + windows[] 校验（mode 白名单/唯一、entry 路径安全；文件存在性由调用侧核验）
+    // Shape resolution plus windows[] validation (whitelisted/unique modes; path-safe entries —
+    // file existence is the caller's check since plan_install stays pure)
+    let supported = resolve_supported_windows(manifest_json, has_web, has_wasm)?;
+    for resolved in [&supported.embedded, &supported.independent].into_iter().flatten() {
+        if !is_safe_entry(&resolved.entry) {
+            return Err(format!(
+                "windows[].entry 非法（每段仅限 [A-Za-z0-9._-]）/ invalid windows entry: {}",
+                resolved.entry
+            ));
+        }
+    }
+
+    // 运行模式：legacy window.mode 显式声明优先，否则按支持形态取默认（embedded 优先）
+    // Window mode: an explicit legacy window.mode wins; otherwise default from the
+    // supported shapes (embedded first)
+    let window_mode = match manifest.window.as_ref().and_then(|w| w.mode.clone()) {
+        Some(mode) => mode,
+        None => if supported.embedded.is_some() {
+            "embedded"
+        } else if supported.independent.is_some() {
+            "independent"
+        } else {
+            "headless"
+        }
+        .to_string(),
+    };
 
     // window_config 快照：仅当 manifest 声明了 window 时入库
     // window_config snapshot: stored only when the manifest declares a window
@@ -133,6 +264,19 @@ pub fn plan_install(
         wasm_path: if has_wasm { Some("main.wasm".into()) } else { None },
         manifest,
     })
+}
+
+// entry 路径安全（相对 web/）：非空、无前导 /、每段仅 [A-Za-z0-9._-]（URL 安全）
+// Entry path safety (web/-relative): non-empty, no leading slash, slug segments (URL-safe)
+fn is_safe_entry(entry: &str) -> bool {
+    !entry.is_empty()
+        && !entry.starts_with('/')
+        && entry.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != ".."
+                && seg != "."
+                && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        })
 }
 
 // 递归复制目录：安装即整包拷贝（源目录 → plugins/{id}）
@@ -234,11 +378,12 @@ pub async fn plugin_install(app: AppHandle, source_dir: String) -> Result<Value,
         )
     })?;
 
-    let plan = plan_install(
-        &manifest_json,
-        src.join("web/index.html").is_file(),
-        src.join("main.wasm").is_file(),
-    )?;
+    let has_web = src.join("web/index.html").is_file();
+    let has_wasm = src.join("main.wasm").is_file();
+    let plan = plan_install(&manifest_json, has_web, has_wasm)?;
+    // windows[] 入口文件存在性核验（纯函数校验之外的 IO 检查）
+    // windows[] entry existence (the IO check beyond the pure validation)
+    ensure_entries_exist(&src, &resolve_supported_windows(&manifest_json, has_web, has_wasm)?)?;
 
     let pool = sqlite_pool(&app).await?;
 
@@ -364,7 +509,7 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
     let pool = sqlite_pool(&app).await?;
 
     let row = sqlx::query(
-        "SELECT window_mode, window_config, wasm_path, manifest, is_enabled
+        "SELECT window_mode, web_path, wasm_path, manifest, is_enabled
          FROM plugins WHERE id = ? AND is_installed = 1",
     )
     .bind(&plugin_id)
@@ -379,46 +524,63 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
     let mode: String = row
         .try_get::<String, _>("window_mode")
         .map_err(|e| e.to_string())?;
-    let config_json: Option<String> = row
-        .try_get::<Option<String>, _>("window_config")
+    let has_web = row
+        .try_get::<Option<String>, _>("web_path")
+        .map_err(|e| e.to_string())?
+        .is_some();
+    let manifest: String = row
+        .try_get::<String, _>("manifest")
+        .map_err(|e| e.to_string())?;
+    let wasm_path: Option<String> = row
+        .try_get::<Option<String>, _>("wasm_path")
         .map_err(|e| e.to_string())?;
 
+    // 形态支持以 manifest 为权威（windows[] 优先，legacy window 回退）
+    // The manifest is authoritative for shape support (windows[] first, legacy fallback)
+    let supported = resolve_supported_windows(&manifest, has_web, wasm_path.is_some())?;
+
     match mode.as_str() {
-        // 内嵌：主窗口唤起并通知路由到 /plugin/:id
-        // Embedded: show the main window and navigate it to /plugin/:id
+        // 内嵌：主窗口唤起并路由到 /plugin/:id（携带该形态的入口）
+        // Embedded: show the main window and navigate to /plugin/:id with the shape's entry
         "embedded" => {
+            let Some(resolved) = supported.embedded else {
+                return Err(format!(
+                    "UnsupportedMode: embedded not declared by {plugin_id}"
+                ));
+            };
             if let Some(main) = app.get_webview_window("main") {
                 main.show().map_err(|e| e.to_string())?;
                 main.set_focus().map_err(|e| e.to_string())?;
-                main.emit("plugin:navigate", &plugin_id)
+                main.emit("plugin:navigate", json!({ "id": plugin_id, "entry": resolved.entry }))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             } else {
                 Err("主窗口不存在 / main window not found".into())
             }
         }
-        // 独立窗口：存在则聚焦，不存在按 manifest.window 创建
-        // Independent: focus the existing window or create one per manifest.window
+        // 独立窗口：存在则聚焦，不存在按该形态的入口与参数创建
+        // Independent: focus the existing window or create one from the shape's entry + params
         "independent" => {
+            let Some(resolved) = supported.independent else {
+                return Err(format!(
+                    "UnsupportedMode: independent not declared by {plugin_id}"
+                ));
+            };
             let label = plugin_window_label(&plugin_id);
             if let Some(win) = app.get_webview_window(&label) {
                 win.show().map_err(|e| e.to_string())?;
                 win.set_focus().map_err(|e| e.to_string())?;
                 Ok(())
             } else {
-                create_plugin_window(&app, &plugin_id, config_json.as_deref())
+                create_plugin_window(&app, &plugin_id, &resolved)
             }
         }
         // headless：立即执行一次默认动作（Phase 6 工作流引擎接管触发编排前）
         // headless: run the default action once (until the Phase 6 workflow engine takes over)
         _ => {
-            let wasm_path: String = row
-                .try_get::<Option<String>, _>("wasm_path")
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "headless 模式需要 main.wasm / headless mode requires main.wasm".to_string())?;
-            let manifest: String = row
-                .try_get::<String, _>("manifest")
-                .map_err(|e| e.to_string())?;
+            if wasm_path.is_none() {
+                return Err("headless 模式需要 main.wasm / headless mode requires main.wasm".into());
+            }
             let action = pick_headless_action(&manifest);
 
             let runtime = app.state::<crate::wasm_runtime::WasmRuntime>();
@@ -478,20 +640,20 @@ pub(crate) fn pick_headless_action(manifest_json: &str) -> String {
     actions.iter().find_map(name_of).unwrap_or("run").to_string()
 }
 
-// 创建插件独立窗口：参数取自 manifest.window（对齐 Tauri 窗口选项），缺省 800×600 可缩放居中
-// Create the independent window: params from manifest.window (Tauri-aligned); defaults 800x600
+// 创建插件独立窗口：入口与参数取自该形态的声明（对齐 Tauri 窗口选项），缺省 800×600 可缩放居中
+// Create the independent window: entry + params from the shape's declaration; defaults 800x600
 fn create_plugin_window(
     app: &AppHandle,
     plugin_id: &str,
-    config_json: Option<&str>,
+    resolved: &ResolvedWindow,
 ) -> Result<(), String> {
-    let cfg: ManifestWindow = config_json
-        .and_then(|j| serde_json::from_str(j).ok())
-        .unwrap_or_default();
+    let cfg = &resolved.params;
 
     let label = plugin_window_label(plugin_id);
     let title = cfg.title.clone().unwrap_or_else(|| plugin_id.to_string());
-    let url = WebviewUrl::App(format!("/plugin-window/{plugin_id}").into());
+    // 入口随查询参数传给壳页（entry 已经 is_safe_entry 校验，URL 安全）
+    // The entry rides a query param into the shell (kept URL-safe by is_safe_entry)
+    let url = WebviewUrl::App(format!("/plugin-window/{plugin_id}?entry={}", resolved.entry).into());
 
     let mut builder = WebviewWindowBuilder::new(app, &label, url)
         .title(&title)
@@ -615,7 +777,7 @@ mod tests {
                         "skipTaskbar": true, "shadow": false, "center": false, "fullscreen": false}
         }"#;
         let plan = plan_install(json, true, false).unwrap();
-        let w = plan.manifest.window.unwrap();
+        let w = &plan.manifest.window.unwrap().params;
         assert_eq!(w.transparent, Some(true));
         assert_eq!(w.decorations, Some(false));
         assert_eq!(w.skip_taskbar, Some(true));
@@ -670,6 +832,127 @@ mod tests {
     }
 
     // ---- pick_headless_action：headless 默认动作 / default headless action ----
+
+    // ---- resolve_supported_windows：形态支持解析 / shape-support resolution ----
+
+    #[test]
+    fn resolves_windows_array_with_per_mode_entries() {
+        let json = r#"{
+            "id": "com.example.demo", "name": "Demo", "version": "1.0.0",
+            "windows": [
+                { "mode": "embedded", "entry": "index.html" },
+                { "mode": "independent", "entry": "window.html", "width": 420, "transparent": true }
+            ]
+        }"#;
+        let s = resolve_supported_windows(json, true, true).unwrap();
+        assert_eq!(s.embedded.as_ref().unwrap().entry, "index.html");
+        let indep = s.independent.as_ref().unwrap();
+        assert_eq!(indep.entry, "window.html");
+        assert_eq!(indep.params.width, Some(420.0));
+        assert_eq!(indep.params.transparent, Some(true));
+        assert!(s.headless); // 有 wasm / has wasm
+    }
+
+    #[test]
+    fn resolves_legacy_window_fallback() {
+        // legacy：window.mode 单形态，入口固定 index.html
+        // legacy: a single window.mode shape with the fixed index.html entry
+        let s = resolve_supported_windows(
+            r#"{"id":"x","name":"X","version":"1","window":{"mode":"independent","width":480}}"#,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(s.embedded.is_none());
+        assert_eq!(s.independent.as_ref().unwrap().entry, "index.html");
+        assert_eq!(s.independent.as_ref().unwrap().params.width, Some(480.0));
+        assert!(!s.headless);
+
+        // 未声明 window：缺省 embedded / no window declared: embedded by default
+        let s = resolve_supported_windows(r#"{"id":"x","name":"X","version":"1"}"#, true, false).unwrap();
+        assert!(s.embedded.is_some());
+        assert!(s.independent.is_none());
+
+        // headless-only：无 web → 无窗口形态 / headless-only: no web -> no window shapes
+        let s = resolve_supported_windows(
+            r#"{"id":"x","name":"X","version":"1","window":{"mode":"headless"}}"#,
+            false,
+            true,
+        )
+        .unwrap();
+        assert!(s.embedded.is_none());
+        assert!(s.independent.is_none());
+        assert!(s.headless);
+    }
+
+    #[test]
+    fn rejects_bad_windows_arrays() {
+        // 拼装最小合法前缀 / assemble the minimal valid prefix
+        let base = r#"{"id":"x","name":"X","version":"1""#;
+        let with = |windows: &str| format!("{base}, \"windows\": [{windows}]}}");
+
+        // headless 不属于 windows[] / headless is not a windows[] mode
+        assert!(resolve_supported_windows(
+            &with(r#"{"mode":"headless","entry":"index.html"}"#),
+            true,
+            false
+        )
+        .is_err());
+        // 重复 mode / duplicate mode
+        assert!(resolve_supported_windows(
+            &with(r#"{"mode":"embedded","entry":"a.html"},{"mode":"embedded","entry":"b.html"}"#),
+            true,
+            false
+        )
+        .is_err());
+        // 非法 mode / invalid mode
+        assert!(resolve_supported_windows(
+            &with(r#"{"mode":"popup","entry":"a.html"}"#),
+            true,
+            false
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn plan_install_validates_entries_and_default_mode() {
+        // entry 文件不存在 / missing entry file（此处纯函数层校验路径安全，存在性见下）
+        let missing = r#"{
+            "id":"com.example.demo","name":"Demo","version":"1.0.0",
+            "windows":[{"mode":"embedded","entry":"../evil.html"}]
+        }"#;
+        assert!(plan_install(missing, true, false).is_err());
+        let slash = r#"{
+            "id":"com.example.demo","name":"Demo","version":"1.0.0",
+            "windows":[{"mode":"embedded","entry":"/abs.html"}]
+        }"#;
+        assert!(plan_install(slash, true, false).is_err());
+
+        // 仅声明 independent：默认模式取 independent / independent-only: defaults to independent
+        let indep_only = r#"{
+            "id":"com.example.demo","name":"Demo","version":"1.0.0",
+            "windows":[{"mode":"independent","entry":"window.html","width":300}]
+        }"#;
+        let plan = plan_install(indep_only, true, false).unwrap();
+        assert_eq!(plan.window_mode, "independent");
+
+        // 存在性核验：src 缺文件时 ensure_entries_exist 拒绝 / existence check rejects
+        let root = temp_dir_for("entries");
+        let src = root.join("src");
+        std::fs::create_dir_all(src.join("web")).unwrap();
+        std::fs::write(src.join("manifest.json"), "{}").unwrap();
+        std::fs::write(src.join("web/index.html"), "<html></html>").unwrap();
+        let json = r#"{
+            "id":"com.example.demo","name":"Demo","version":"1.0.0",
+            "windows":[{"mode":"embedded","entry":"index.html"},{"mode":"independent","entry":"window.html"}]
+        }"#;
+        let supported = resolve_supported_windows(json, true, false).unwrap();
+        // window.html 尚未创建 → 拒绝 / window.html not yet created -> rejected
+        assert!(ensure_entries_exist(&src, &supported).is_err());
+        std::fs::write(src.join("web/window.html"), "<html></html>").unwrap();
+        assert!(ensure_entries_exist(&src, &supported).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn headless_action_prefers_run_then_first() {

@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::plugin_manager::{plugin_window_label, sqlite_pool};
 use crate::plugin_protocol::is_valid_plugin_id;
@@ -588,8 +588,17 @@ pub async fn plugin_bridge(
             Ok(Value::Null)
         }
         "kapi:window.close" => {
-            ensure_own_window(&window, &plugin_id)?;
-            window.close().map_err(|e| e.to_string())?;
+            if window.label() == plugin_window_label(&plugin_id) {
+                // 独立窗口：真正关窗 / own window: actually close it
+                window.close().map_err(|e| e.to_string())?;
+            } else {
+                // 内嵌宿主：等效"关闭插件页面"——通知本窗口离开内嵌视图（App.tsx 监听 plugin:close）
+                // Embedded host: equivalent to closing the plugin page — tell this window
+                // to leave the embed view (App.tsx listens for plugin:close)
+                window
+                    .emit_to(window.label(), "plugin:close", ())
+                    .map_err(|e| e.to_string())?;
+            }
             Ok(Value::Null)
         }
         "kapi:window.minimize" => {
