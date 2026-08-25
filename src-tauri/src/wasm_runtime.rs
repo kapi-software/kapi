@@ -78,14 +78,14 @@ impl ResourceLimiter for MemLimiter {
 
 // Store 数据：每次调用新建；宿主导入在此取权限快照 / 连接池 / tokio 句柄
 // Store data: fresh per invoke; host imports read the guard snapshot, pool and tokio handle here
+// stdout/stderr 管道经 Arc 共享，读端由 run_guest 持有，无需存入 ctx
+// stdout/stderr pipes are Arc-shared; run_guest keeps the readers, so ctx holds none
 pub struct WasmCallCtx {
     plugin_id: String,
     guard: PermissionGuard,
     pool: sqlx::SqlitePool,
     rt: tokio::runtime::Handle,
     wasi: WasiP1Ctx,
-    stdout: MemoryOutputPipe,
-    stderr: MemoryOutputPipe,
     limiter: MemLimiter,
 }
 
@@ -214,6 +214,7 @@ impl WasmRuntime {
     }
 
     // 仅供测试：缓存条目数 / test-only: cached module count
+    #[cfg(test)]
     pub(crate) fn cached_module_count(&self) -> usize {
         self.lock_modules().len()
     }
@@ -477,8 +478,6 @@ fn run_guest(
             pool,
             rt,
             wasi,
-            stdout,
-            stderr,
             limiter: MemLimiter::new(MAX_MEMORY_BYTES),
         },
     );
@@ -573,12 +572,14 @@ mod tests {
         pool
     }
 
-    async fn insert_plugin(pool: &sqlx::SqlitePool, id: &str, manifest: &str) {
+    async fn insert_plugin(pool: &sqlx::SqlitePool, id: &str, manifest: &str, install_path: &str) {
         sqlx::query(
-            "INSERT INTO plugins (id, name, version, manifest, install_path) VALUES (?, 'Demo', '1.0.0', ?, '/tmp/wasm-test')",
+            "INSERT INTO plugins (id, name, version, manifest, install_path, wasm_path, web_path)
+             VALUES (?, 'Demo', '1.0.0', ?, ?, 'main.wasm', 'web/index.html')",
         )
         .bind(id)
         .bind(manifest)
+        .bind(install_path)
         .execute(pool)
         .await
         .unwrap();
@@ -763,7 +764,7 @@ mod tests {
         .unwrap();
 
         // 未声明权限 → PermissionDenied / no permission declared -> denied
-        insert_plugin(&pool, "com.test.host", r#"{"id":"com.test.host"}"#).await;
+        insert_plugin(&pool, "com.test.host", r#"{"id":"com.test.host"}"#, "/tmp/wasm-test").await;
         let (result, _) = run_on_blocking(
             &engine, &linker, module.clone(), PermissionGuard::default(), pool.clone(),
             "com.test.host", "x", Value::Null, InvokeLimits::default(),
@@ -795,7 +796,7 @@ mod tests {
     async fn host_call_logs_to_system_logs() {
         let pool = test_pool().await;
         let (engine, linker) = parts();
-        insert_plugin(&pool, "com.test.log", r#"{"id":"com.test.log"}"#).await;
+        insert_plugin(&pool, "com.test.log", r#"{"id":"com.test.log"}"#, "/tmp/wasm-test").await;
         let module = Module::new(
             &engine,
             &host_call_wat("kapi:log.info", r#"{"message":"from wasm"}"#),
@@ -901,6 +902,58 @@ mod tests {
         // sets the i64 sign bit — an inherent ABI edge, far beyond real guest pointers)
         assert_eq!(unpack_result(pack_result(u32::MAX, u32::MAX)), (u32::MAX, u32::MAX));
         assert_eq!(pack_result(0x1234, 0x5678), (0x1234i64) << 32 | 0x5678);
+    }
+
+    // ---- 提交 fixture 验证 / committed-fixture verification ----
+
+    #[tokio::test]
+    async fn plugin_d_fixture_invokes_reverse_and_log() {
+        // 直接跑仓库内提交的 main.wasm：防 fixture 与 wasm-src / ABI 漂移
+        // Runs the committed main.wasm directly: guards drift between the fixture, wasm-src and the ABI
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/pluginD");
+        if !fixture.join("main.wasm").is_file() {
+            // fixture 未构建时跳过（构建步骤见 plugins/pluginD/wasm-src/README.md）
+            // Skipped until the fixture is built (see plugins/pluginD/wasm-src/README.md)
+            return;
+        }
+        let pool = test_pool().await;
+        let runtime = WasmRuntime::new();
+        insert_plugin(
+            &pool,
+            "com.kapi.sample.plugin-d",
+            r#"{"id":"com.kapi.sample.plugin-d","permissions":[]}"#,
+            fixture.to_str().unwrap(),
+        )
+        .await;
+
+        // reverse：文本反转 / reverse flips the text
+        let out = runtime
+            .invoke_action(&pool, "com.kapi.sample.plugin-d", "reverse", &json!({"text": "Hello Kapi"}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!({"text": "ipaK olleH"}));
+
+        // log：经宿主导入写系统日志（UI/WASM 共用分发的端到端证明）
+        // log writes through the host import (end-to-end proof of the shared dispatch)
+        let out = runtime
+            .invoke_action(&pool, "com.kapi.sample.plugin-d", "log", &json!({"text": "fixture"}))
+            .await
+            .unwrap();
+        assert_eq!(out, json!({"logged": true}));
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM system_logs WHERE source = 'plugin:com.kapi.sample.plugin-d' AND message = 'plugin-d: fixture'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+
+        // 未知动作 / unknown action
+        let err = runtime
+            .invoke_action(&pool, "com.kapi.sample.plugin-d", "nope", &Value::Null)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("UnknownAction: nope"), "{err}");
     }
 
     // ---- 模块缓存与 evict / module cache and eviction ----

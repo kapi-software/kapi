@@ -1,0 +1,19 @@
+{
+  "id": "com.kapi.sample.plugin-d",
+  "name": "示例插件 D · WASM",
+  "version": "1.0.0",
+  "kapi_version": "^1.0.0",
+  "author": "Kapi",
+  "description": "WASM 运行时示例：reverse 动作走 wasmtime 沙箱，log 动作经宿主导入写系统日志",
+  "category": "tool",
+  "permissions": [],
+  "window": {
+    "mode": "embedded"
+  },
+  "workflow": {
+    "actions": [
+      { "name": "reverse", "inputs": { "text": "string" }, "outputs": { "text": "string" } },
+      { "name": "log", "inputs": { "text": "string" }, "outputs": {} }
+    ]
+  }
+}
