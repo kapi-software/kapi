@@ -23,13 +23,13 @@ import Settings from "@/pages/Settings";
 // Panel layout: official Sidebar (inset variant) + SidebarInset content (shadcn sidebar-07)
 function PanelLayout() {
   return (
-    // 覆盖官方默认宽度：展开 16rem→12rem，图标态 3rem→2rem（仅此处声明，官方组件不改）
-    // Override official widths: expanded 16rem→12rem, icon rail 3rem→2rem (declared only here, vendored file untouched)
+    // 覆盖官方默认宽度：展开 16rem→12rem，图标态保持 3rem（仅此处声明，官方组件不改）
+    // Override the official width: expanded 16rem→12rem, icon rail keeps the 3rem default (declared only here, vendored file untouched)
     <SidebarProvider
       style={
         {
           "--sidebar-width": "12rem",
-          "--sidebar-width-icon": "2rem",
+          "--sidebar-width-icon": "3rem",
         } as CSSProperties
       }
     >

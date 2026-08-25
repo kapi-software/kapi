@@ -24,7 +24,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
 } from "@/components/ui/sidebar";
 
 // 导航分组与路由项（概览 / 插件 / 自动化 / 系统）
@@ -125,7 +124,7 @@ export function AppSidebar() {
 
       {/* 右缘隐形轨道：悬停可收起/展开，与顶栏触发按钮等效 */}
       {/* Invisible edge rail: hover to toggle, equivalent to the header trigger */}
-      <SidebarRail />
+      {/* <SidebarRail /> */}
     </Sidebar>
   );
 }
