@@ -119,6 +119,7 @@ export default {
     modeEmbedded: 'Embedded',
     modeIndependent: 'Independent',
     modeHeadless: 'Headless',
+    modeLocked: 'Plugin window is open; close it before switching modes',
     enabled: 'Enabled',
     moveUp: 'Move up',
     moveDown: 'Move down',

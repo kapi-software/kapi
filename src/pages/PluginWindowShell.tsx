@@ -1,6 +1,6 @@
 // 插件独立窗口壳：/plugin-window/:id（裸 PluginHost，docs/ARCHITECTURE.md §2.2）
 // Plugin independent window shell: /plugin-window/:id (a bare PluginHost)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PluginHost } from "@/components/plugin/PluginHost";
@@ -22,6 +22,42 @@ async function loadTransparent(pluginId: string): Promise<boolean> {
   }
 }
 
+// 就绪后显示窗口：窗口以 visible:false 创建，内容就绪（iframe onLoad 或 1.5s 兜底定时）
+// 才 show + setFocus，避免启动白屏闪烁；只执行一次，返回"就绪"回调给 iframe onLoad。
+// Show the window once ready: created with visible:false, it shows (and focuses) only
+// after the content is ready — iframe onLoad or a 1.5s fallback timer — avoiding the
+// white startup flash. Runs at most once; returns the ready callback for iframe onLoad.
+function useShowWhenReady(enabled: boolean): () => void {
+  const showRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    if (!enabled) return;
+    let done = false;
+    let timer: number | null = null;
+    const show = async () => {
+      if (done) return;
+      done = true;
+      if (timer !== null) window.clearTimeout(timer);
+      try {
+        const win = getCurrentWindow();
+        await win.show();
+        await win.setFocus();
+      } catch {
+        // 显示失败不阻断渲染 / a failed show never blocks rendering
+      }
+    };
+    showRef.current = () => void show();
+    // 兜底：iframe 迟迟不触发 onLoad（加载失败等）也要把窗口放出来
+    // Fallback: surface the window even if iframe onLoad never fires
+    timer = window.setTimeout(show, 1500);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [enabled]);
+
+  return () => showRef.current();
+}
+
 export default function PluginWindowShell() {
   const { id: paramId } = useParams<{ id: string }>();
   // id 权威来源是路由参数（完整插件 id）；label 作回退（其中 "." 已被替换为 "_"，有损）
@@ -34,6 +70,7 @@ export default function PluginWindowShell() {
   // null = 加载中：首帧即透明，避免透明窗口闪过一帧不透明背景
   // null = loading: the first frame is already transparent, no opaque flash
   const [transparent, setTransparent] = useState<boolean | null>(null);
+  const markReady = useShowWhenReady(isTauri());
 
   useEffect(() => {
     if (!id) return;
@@ -63,7 +100,7 @@ export default function PluginWindowShell() {
 
   return (
     <div className={transparent ? "h-svh w-full" : "h-svh w-full bg-background"}>
-      <PluginHost pluginId={id} />
+      <PluginHost pluginId={id} onLoaded={markReady} />
     </div>
   );
 }

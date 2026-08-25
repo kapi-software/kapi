@@ -19,6 +19,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { usePluginsStore } from "@/stores/plugins";
+import { pluginWindowLabel, usePluginWindows } from "@/hooks/use-plugin-windows";
 import { isTauri } from "@/lib/tauri";
 import type { Plugin, WindowMode } from "@/types";
 
@@ -36,10 +37,14 @@ function PluginCard({
   plugin,
   index,
   total,
+  modeLocked,
 }: {
   plugin: Plugin;
   index: number;
   total: number;
+  // 独立窗口运行中：锁定模式切换（切换会导致悬挂窗口 / 静默失效）
+  // Independent window open: lock the mode switch (switching would orphan/break the window)
+  modeLocked: boolean;
 }) {
   const { t } = useTranslation();
   const { setEnabled, setWindowMode, move, uninstall } = usePluginsStore();
@@ -100,6 +105,7 @@ function PluginCard({
         <div className="flex items-center gap-2">
           <Select
             value={plugin.window_mode}
+            disabled={modeLocked}
             onValueChange={(v) =>
               setWindowMode(plugin.id, v as WindowMode).catch((e) =>
                 toast.error(String(e))
@@ -117,6 +123,14 @@ function PluginCard({
               ))}
             </SelectContent>
           </Select>
+          {modeLocked && (
+            <span
+              className="text-[10px] text-muted-foreground/80"
+              title={t("plugins.modeLocked")}
+            >
+              🔒
+            </span>
+          )}
           <Button size="sm" variant="outline" onClick={handleLaunch}>
             <Play />
             {t("plugins.launch")}
@@ -159,6 +173,7 @@ function PluginCard({
 export default function Plugins() {
   const { t } = useTranslation();
   const { plugins, loading, load, installFromDir } = usePluginsStore();
+  const pluginWindows = usePluginWindows();
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
@@ -214,7 +229,13 @@ export default function Plugins() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {plugins.map((p, i) => (
-              <PluginCard key={p.id} plugin={p} index={i} total={plugins.length} />
+              <PluginCard
+                key={p.id}
+                plugin={p}
+                index={i}
+                total={plugins.length}
+                modeLocked={pluginWindows.has(pluginWindowLabel(p.id))}
+              />
             ))}
           </div>
         )}

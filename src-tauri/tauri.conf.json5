@@ -74,17 +74,21 @@
             "core:window:allow-show",
             "core:window:allow-set-focus",
             "core:window:allow-start-dragging",
+            // 插件页列出窗口以判断"运行中"（禁用模式切换）
+            // The plugins page lists windows to detect "running" (mode switch disabled)
+            "core:window:allow-get-all-windows",
           ],
         },
         {
           // 插件独立窗口壳（label 形如 plugin-com_kapi_sample_plugin-a，glob 匹配）
           // Plugin window shells (labels like plugin-com_kapi_sample_plugin-a; glob-matched)
-          // 壳需读 window_config（sql:default 的 load/select）；应用自有命令（plugin_bridge）不经 ACL
-          // The shell reads window_config (sql:default load/select); app commands bypass the ACL
+          // 壳需读 window_config（sql:default 的 load/select）并在就绪后 show 自己（防启动闪白）
+          // The shell reads window_config (sql:default load/select) and shows itself when
+          // ready (hidden creation prevents the startup flash); app commands bypass the ACL
           identifier: "plugin-window",
           description: "插件独立窗口壳的能力 / Capability for plugin window shells",
           windows: ["plugin-*"],
-          permissions: ["core:default", "sql:default"],
+          permissions: ["core:default", "sql:default", "core:window:allow-show", "core:window:allow-set-focus"],
         },
       ],
     },

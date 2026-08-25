@@ -498,6 +498,16 @@ fn validate_action(action: &str) -> Result<(), String> {
     }
 }
 
+// 展示环境：调用方窗口 label 精确匹配插件独立窗口 → independent，否则 embedded
+// Display context: an exact label match means the plugin's own window; anything else is embedded
+fn display_mode(caller_label: &str, plugin_id: &str) -> &'static str {
+    if caller_label == plugin_window_label(plugin_id) {
+        "independent"
+    } else {
+        "embedded"
+    }
+}
+
 // ---- 命令与分发 / command and dispatch ----
 
 // 通道分发：UI 桥（plugin_bridge 命令）与 WASM 宿主导入（kapi_host_call）共用的唯一权限闸与路由
@@ -565,6 +575,9 @@ pub async fn plugin_bridge(
     let ctx = load_bridge_context(&pool, &plugin_id).await?;
 
     match channel.as_str() {
+        // 只读环境查询：两种模式均可调用（插件据此隐藏/展示窗口控制按钮）
+        // Read-only context query: callable in both modes (plugins toggle window controls with it)
+        "kapi:window.getInfo" => Ok(json!({ "mode": display_mode(window.label(), &plugin_id) })),
         // 窗口控制仅 UI 路径可用（需调用方 WebviewWindow）
         // Window control is available only on the UI path (needs the caller's WebviewWindow)
         "kapi:window.setTitle" => {
@@ -746,6 +759,23 @@ mod tests {
         assert_eq!(normalize_method(Some("post")).unwrap(), "POST");
         assert!(normalize_method(Some("TRACE")).is_err());
         assert!(normalize_method(Some("connect")).is_err());
+    }
+
+    #[test]
+    fn display_mode_matches_own_window_label_only() {
+        // 精确匹配自身窗口 label → independent
+        // An exact own-label match -> independent
+        assert_eq!(
+            display_mode("plugin-com_kapi_sample_plugin-c", "com.kapi.sample.plugin-c"),
+            "independent"
+        );
+        // 主面板（embedded 宿主）/ the main panel (the embedded host)
+        assert_eq!(display_mode("main", "com.kapi.sample.plugin-c"), "embedded");
+        // 其它插件的窗口同样不算 / another plugin's window doesn't count either
+        assert_eq!(
+            display_mode("plugin-com_kapi_sample_plugin-b", "com.kapi.sample.plugin-c"),
+            "embedded"
+        );
     }
 
     #[test]

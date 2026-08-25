@@ -501,7 +501,10 @@ fn create_plugin_window(
         .decorations(cfg.decorations.unwrap_or(true))
         .skip_taskbar(cfg.skip_taskbar.unwrap_or(false))
         .shadow(cfg.shadow.unwrap_or(true))
-        .fullscreen(cfg.fullscreen.unwrap_or(false));
+        .fullscreen(cfg.fullscreen.unwrap_or(false))
+        // 隐藏创建防白屏闪烁：壳页内容就绪后自行 show（PluginWindowShell）
+        // Created hidden to avoid a white flash; the shell shows itself once ready
+        .visible(false);
     // 透明：macOS 由 macos-private-api feature 门控（已启用），条件调用保持语义清晰
     // Transparent: gated by the macos-private-api feature on macOS (enabled); conditional call
     if cfg.transparent.unwrap_or(false) {

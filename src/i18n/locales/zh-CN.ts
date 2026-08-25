@@ -120,6 +120,7 @@ export default {
     modeEmbedded: '内嵌',
     modeIndependent: '独立窗口',
     modeHeadless: '无界面',
+    modeLocked: '插件窗口运行中，暂不能切换模式 / plugin window is open',
     enabled: '启用',
     moveUp: '上移',
     moveDown: '下移',

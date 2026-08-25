@@ -8,7 +8,17 @@ import { pluginAssetUrl } from "@/lib/plugin-url";
 import { createPluginBridgeHandler } from "@/lib/plugin-bridge";
 import { invokeTyped, isTauri } from "@/lib/tauri";
 
-export function PluginHost({ pluginId, className }: { pluginId: string; className?: string }) {
+export function PluginHost({
+  pluginId,
+  className,
+  onLoaded,
+}: {
+  pluginId: string;
+  className?: string;
+  // iframe 加载完成回调（独立窗口壳用于就绪后 show，防启动闪白）
+  // iframe load callback (the shell shows the window once ready, avoiding a startup flash)
+  onLoaded?: () => void;
+}) {
   const frameRef = useRef<HTMLIFrameElement>(null);
 
   // 桥接监听：仅 Tauri 环境挂载（浏览器预览无 IPC）；pluginId 变更时重建
@@ -29,6 +39,7 @@ export function PluginHost({ pluginId, className }: { pluginId: string; classNam
       ref={frameRef}
       src={pluginAssetUrl(pluginId)}
       title={`plugin-${pluginId}`}
+      onLoad={onLoaded}
       // 沙箱最小权限：允许脚本 / 表单；跨源隔离天然成立（kapi-plugin 与宿主不同源）
       // 不加 allow-same-origin：保持 opaque origin，iframe 内拿不到 Tauri IPC 通道
       // Minimal sandbox: scripts/forms allowed; no allow-same-origin keeps the opaque

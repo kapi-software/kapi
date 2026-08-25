@@ -129,6 +129,7 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 | `kapi:events.on` | `events:subscribe` | — | **未实现**（订阅需 SDK 推送协议，随 @kapi/plugin-sdk 落地） |
 | `kapi:plugin.invoke` | 无需声明（调用自身） | `{action, payload?}` | guest 动作返回的 `data`；未知动作 → `UnknownAction: <name>` |
 | `kapi:window.setTitle` | — | `{title}` | `null` |
+| `kapi:window.getInfo` | — | — | `{mode}`（`"embedded"` \| `"independent"`；只读环境查询，两种模式均可调用，插件据此隐藏/展示窗口控制按钮） |
 | `kapi:window.close` / `minimize` / `startDragging` | — | — | `null` |
 | `kapi:log.debug/info/warn/error` | — | `{message, data?}` | `null`（写 system_logs，source=`plugin:<id>`） |
 

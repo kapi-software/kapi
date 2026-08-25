@@ -105,6 +105,18 @@
           .catch((err) => (status.textContent = String(err.message || err)));
       }
 
+      // 启动时查询展示环境：embedded 模式隐藏关闭按钮与拖拽提示（窗口控制仅独立窗口可用）
+      // Query the display context on load: embedded mode hides the close button and drag
+      // hint (window controls are independent-window only)
+      call("kapi:window.getInfo", {})
+        .then((info) => {
+          if (info && info.mode !== "independent") {
+            document.getElementById("close").style.display = "none";
+            document.getElementById("drag").textContent = "示例插件 C · 内嵌模式";
+            document.getElementById("drag").style.cursor = "default";
+          }
+        })
+        .catch(() => {});
       // 无边框窗口唯一移动方式：按住标题区拖拽（按钮点击不触发）
       // The only way to move a frameless window: drag the title area (buttons excluded)
       document.getElementById("drag").addEventListener("mousedown", () => {
