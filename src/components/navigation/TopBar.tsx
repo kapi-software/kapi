@@ -1,28 +1,14 @@
-/**
- * @file TopBar.tsx
- * @description 主面板顶栏：拖拽区（无边框窗口）+ 窗口控制按钮
- * Panel top bar: drag region (frameless window) + window control buttons
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 初始实现（主窗口 decorations: false 的自绘标题栏）
- * - 2026-08-25: 接入 i18n
- */
-
+// 主面板顶栏：拖拽区（无边框窗口）+ 窗口控制按钮
+// Panel top bar: drag region (frameless window) + window control buttons
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 import { isTauri } from "@/lib/tauri";
 
-/**
- * 窗口控制按钮组（仅 Tauri 环境渲染）
- * Window control buttons (rendered only inside Tauri)
- *
- * 阻止事件冒泡，避免触发外层 data-tauri-drag-region 的拖拽
- * Stops event propagation to avoid triggering the outer drag region
- */
+// 窗口控制按钮组（仅 Tauri 环境渲染）
+// Window control buttons (rendered only inside Tauri)
+// 阻止事件冒泡，避免触发外层 data-tauri-drag-region 的拖拽
+// Stops propagation to avoid triggering the outer drag region
 function WindowControls() {
   const { t } = useTranslation();
 
@@ -68,7 +54,8 @@ function WindowControls() {
   );
 }
 
-/** 主面板顶栏：整条可拖拽 + 窗口控制 / Draggable top bar with window controls */
+// 主面板顶栏：整条可拖拽 + 窗口控制
+// Draggable top bar with window controls
 export function TopBar() {
   return (
     <header

@@ -1,14 +1,6 @@
-/**
- * @file stores/settings.ts
- * @description 设置 Zustand store：加载 / 更新 / 重置（对应 docs/plan.MD §8.1）
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 初始实现
- */
-
+// 设置 Zustand store：加载 / 更新 / 重置
+// Settings Zustand store: load / update / reset
+// 设计见 docs/PANEL.md
 import { create } from 'zustand'
 import { settingsDb, initDb } from '@/lib/db'
 import { isTauri } from '@/lib/tauri'
@@ -21,7 +13,8 @@ import {
 interface SettingsStore {
   settings: AppSettings
   loading: boolean
-  /** 初始化是否完成（浏览器环境无 Tauri 时也为 true，保持默认值） */
+  // 初始化是否完成（浏览器环境无 Tauri 时也为 true，保持默认值）
+  // Whether initialization finished (true in browsers too, keeping defaults)
   ready: boolean
   loadSettings: () => Promise<void>
   updateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => Promise<void>
@@ -35,6 +28,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
 
   loadSettings: async () => {
     // 浏览器环境：无数据库，直接就绪（保持默认值）
+    // Browser env: no DB, ready immediately with defaults
     if (!isTauri()) {
       set({ ready: true })
       return
@@ -53,6 +47,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
 
   updateSetting: async (key, value) => {
     // 先写库再更新状态，失败时状态不被污染
+    // Persist first, then update state so failures don't dirty the UI
     if (isTauri()) {
       await settingsDb.set(key, JSON.stringify(value))
     }

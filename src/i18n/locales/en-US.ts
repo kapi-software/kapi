@@ -1,14 +1,4 @@
-/**
- * @file en-US.ts
- * @description English (US) locale pack
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 随 i18n 初始化创建
- */
-
+// English (US) locale pack
 export default {
   app: {
     name: 'Kapi',

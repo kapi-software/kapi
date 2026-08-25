@@ -1,14 +1,6 @@
-/**
- * @file db.ts
- * @description 数据库访问层：插件 / 插件数据 / 工作流 / 设置 / 日志（对应 docs/plan.MD §3.6）
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 初始实现（迁移已在 Rust 侧完成，此处仅读写）
- */
-
+// 数据库访问层：插件 / 插件数据 / 工作流 / 设置 / 日志
+// Database access layer: plugins / plugin data / workflows / settings / logs
+// 表结构见 docs/DATABASE.md；迁移已在 Rust 侧完成（src-tauri/src/db.rs），此处仅读写
 import Database from '@tauri-apps/plugin-sql'
 import type {
   Plugin,
@@ -24,30 +16,16 @@ import type {
 
 let db: Database
 
-/**
- * 连接数据库 / Connect to the database
- *
- * 迁移已由 Rust 侧 tauri-plugin-sql 自动完成（src-tauri/src/db.rs），
- * 此处仅获取连接。重复调用返回已有连接。
- *
- * @returns 数据库连接 / Database connection
- *
- * @example
- * await initDb()
- * const plugins = await pluginDb.getAll()
- */
+// 连接数据库；重复调用复用已有连接
+// Connect to the database; repeated calls reuse the existing connection
 export async function initDb(): Promise<Database> {
-  // 已连接则直接复用 / Reuse existing connection
   if (db) return db
   db = await Database.load('sqlite:kapi.db')
   return db
 }
 
-/**
- * 获取当前连接 / Get current connection
- *
- * @throws 未初始化时抛错 / Throws if not initialized
- */
+// 获取当前连接；未初始化时抛错
+// Get the current connection; throws if not initialized
 export function getDb(): Database {
   if (!db) throw new Error('数据库未初始化，请先调用 initDb() / Database not initialized')
   return db
@@ -57,7 +35,8 @@ export function getDb(): Database {
 // 插件操作 / Plugin operations
 // ============================================================
 
-/** plugins 表行 → Plugin（解析 manifest / window_config JSON）*/
+// plugins 表行 → Plugin（解析 manifest / window_config JSON）
+// plugins row → Plugin (parses manifest / window_config JSON)
 function parsePlugin(row: PluginRow): Plugin {
   return {
     ...row,
@@ -67,7 +46,8 @@ function parsePlugin(row: PluginRow): Plugin {
 }
 
 export const pluginDb = {
-  /** 全部已安装插件（按 sort_order）/ All installed plugins */
+  // 全部已安装插件（按 sort_order）
+  // All installed plugins ordered by sort_order
   async getAll(): Promise<Plugin[]> {
     const rows = await getDb().select<PluginRow[]>(
       'SELECT * FROM plugins WHERE is_installed = 1 ORDER BY sort_order'
@@ -75,13 +55,15 @@ export const pluginDb = {
     return rows.map(parsePlugin)
   },
 
-  /** 按 id 查询 / Get by id */
+  // 按 id 查询
+  // Get by id
   async getById(id: string): Promise<Plugin | null> {
     const rows = await getDb().select<PluginRow[]>('SELECT * FROM plugins WHERE id = $1', [id])
     return rows[0] ? parsePlugin(rows[0]) : null
   },
 
-  /** 保存（INSERT OR REPLACE）/ Save */
+  // 保存（INSERT OR REPLACE）
+  // Save (INSERT OR REPLACE)
   async save(plugin: Plugin): Promise<void> {
     await getDb().execute(
       `INSERT OR REPLACE INTO plugins
@@ -109,12 +91,14 @@ export const pluginDb = {
     )
   },
 
-  /** 删除（级联清 plugin_data）/ Delete (cascades plugin_data) */
+  // 删除（外键级联清 plugin_data）
+  // Delete (foreign key cascades plugin_data)
   async delete(id: string): Promise<void> {
     await getDb().execute('DELETE FROM plugins WHERE id = $1', [id])
   },
 
-  /** 切换运行模式 / Switch window mode */
+  // 切换运行模式
+  // Switch window mode
   async updateWindowMode(id: string, mode: WindowMode): Promise<void> {
     await getDb().execute(
       'UPDATE plugins SET window_mode = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
@@ -122,7 +106,8 @@ export const pluginDb = {
     )
   },
 
-  /** 批量更新排序（单事务）/ Batch update sort order in one transaction */
+  // 批量更新排序（单事务）
+  // Batch update sort order in one transaction
   async updateSortOrder(orderedIds: string[]): Promise<void> {
     await getDb().execute('BEGIN')
     try {
@@ -142,7 +127,7 @@ export const pluginDb = {
 
 // ============================================================
 // 插件数据操作 / Plugin-scoped KV operations
-// （命名空间隔离由 Rust 权限层强制，此处为宿主侧管理入口）
+// 命名空间隔离由 Rust 权限层强制，此处为宿主侧管理入口
 // ============================================================
 
 export const pluginDataDb = {
@@ -182,6 +167,8 @@ export const pluginDataDb = {
 // 工作流操作 / Workflow operations
 // ============================================================
 
+// workflows 表行 → Workflow（解析 graph JSON）
+// workflows row → Workflow (parses graph JSON)
 function parseWorkflow(row: WorkflowRow): Workflow {
   return { ...row, graph: JSON.parse(row.graph) }
 }
@@ -208,11 +195,13 @@ export const workflowDb = {
   },
 
   async delete(id: string): Promise<void> {
-    // 级联清 runs / Cascades runs
+    // 外键级联清 runs
+    // Foreign key cascades runs
     await getDb().execute('DELETE FROM workflows WHERE id = $1', [id])
   },
 
-  /** 查询执行历史（含步骤日志）/ Runs with step logs */
+  // 查询执行历史（含步骤日志）
+  // Runs with step logs
   async getRuns(workflowId: string, limit = 20): Promise<WorkflowRun[]> {
     const runs = await getDb().select<WorkflowRun[]>(
       `SELECT * FROM workflow_runs WHERE workflow_id = $1
@@ -221,7 +210,8 @@ export const workflowDb = {
     )
     if (runs.length === 0) return runs
 
-    // 步骤日志按 run_id 批量拉取 / Batch fetch step logs
+    // 步骤日志按 run_id 批量拉取
+    // Batch fetch step logs by run_id
     const ids = runs.map((r) => r.id)
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(',')
     const steps = await getDb().select<WorkflowStepLog[]>(
@@ -233,7 +223,7 @@ export const workflowDb = {
 }
 
 // ============================================================
-// 设置操作 / Settings operations（统一表，plan §8）
+// 设置操作 / Settings operations（统一表，见 docs/PANEL.md）
 // ============================================================
 
 export const settingsDb = {

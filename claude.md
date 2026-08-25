@@ -8,78 +8,46 @@
 
 ---
 
-## 〇、项目技术约束 / Project Technical Constraints
+## 〇、项目约定 / Project Conventions
 
-### 0.1 本机透明加密软件（TSD）/ Transparent Encryption on This Machine
+### 0.1 i18n 约定 / i18n Conventions
 
-本开发机的 DLP 透明加密软件会加密**受信进程（Node / VS Code / Claude Code）写入的 `.json` / `.txt` 文件**（密文头 `%TSD-Header-###%`），非受信进程（cargo、Git Bash 工具）读到密文导致构建失败。实测 `.ts` / `.tsx` / `.toml` / `.json5` / `.md` 不受影响；bash 写入的 `.json` 为明文。
-
-This machine's DLP transparent-encryption software encrypts `.json` / `.txt` files written by trusted processes (Node / VS Code / Claude Code), causing cargo builds to fail when reading ciphertext. `.ts` / `.tsx` / `.toml` / `.json5` / `.md` are unaffected.
-
-**规则 / Rules**：
-
-- Tauri 配置使用 `tauri.conf.json5`（`config-json5` feature 已启用），capability 内联于 `app.security.capabilities`
-- 新增配置 / 数据文件避免 `.json` / `.txt` 扩展名——语言包用 `.ts`，配置用 `.json5` 或 `.toml`
-- 若必须生成 `.json` 且需被 Rust 读取，用 bash 写入（明文）
-
-### 0.2 i18n 约定 / i18n Conventions
-
-- 使用 `react-i18next`，语言包为 **TypeScript 模块**：`src/i18n/locales/zh-CN.ts` 与 `en-US.ts`（不用 `.json`，见 §0.1）
-- 所有 UI 文案必须通过 `t()` 输出，禁止在组件内硬编码中文字符串
+- 使用 `react-i18next`，语言包为 **TypeScript 模块**：`src/i18n/locales/zh-CN.ts` 与 `en-US.ts`
+- 所有 UI 文案必须通过 `t()` 输出，禁止在组件内硬编码界面文案
 - 语言设置持久化于 `settings.language`（`zh-CN` / `en-US`），切换时同步 `i18n.changeLanguage` 与 `document.documentElement.lang`
 - 两个语言包的 key 结构必须一致（有单元测试校验）
+- `docs/` 下的设计文档使用中文；README 默认英文（`README.md`）+ 中文版（`README.zh-CN.md`）
 
 ---
 
 ## 一、代码注释规范 / Code Comment Standards
 
-**核心规则 / Core Rule**：注释正文一律**两行制**——第一行中文、第二行英文；仅单行元数据标签（`@file`、`@author`、表格表头等）可用「中文 / English」一行制。
+**核心规则 / Core Rules**：
 
-Comment bodies MUST use the two-line style: Chinese on the first line, English on the second. Only single-line metadata tags (`@file`, `@author`, table headers) may use the one-line `Chinese / English` style.
+1. **不使用文件头注释块**——禁止 `/** @file ... @author ... @changes */` 之类的头部注释；文件用途用文件顶部最多两行 `//` 注释简要说明（可选）。
+2. 注释一律**两行制**——第一行中文、第二行英文。
 
-### 1.1 文件头注释 / File Header Comment
+**Core rules**:
 
-每个文件必须包含文件头注释，包含文件说明、作者、创建日期和更新历史。
+1. **No file header comment blocks** — `/** @file ... @author ... */` headers are forbidden; optionally state the file's purpose in at most two `//` lines at the top.
+2. All comments use the **two-line style** — Chinese on the first line, English on the second.
+
+### 1.1 文件顶部说明 / File Top Note（可选）
 
 ```typescript
-/**
- * @file 文件名 / File Name
- * @description 文件功能描述
- * File function description
- * @author 作者名 / Author Name
- * @created YYYY-MM-DD
- * @updated YYYY-MM-DD
- *
- * @changes
- * - YYYY-MM-DD: 更新说明 / Update description
- * - YYYY-MM-DD: 添加功能 / Added feature
- */
+// 数据库访问层：插件 / 插件数据 / 工作流 / 设置 / 日志
+// Database access layer: plugins / plugin data / workflows / settings / logs
 ```
 
 ### 1.2 函数注释 / Function Comments
 
-每个函数必须包含详细的 JSDoc 注释，包含功能说明、参数、返回值和示例。
+复杂函数在上方用 `//` 两行注释说明意图（可附一行用法示例）；简单函数无需注释。**不使用 JSDoc 块**。
+For non-trivial functions, explain intent in two-line `//` comments above (optionally with a one-line usage example); trivial functions need none. **No JSDoc blocks**.
 
 ```typescript
-/**
- * 计算 Dock 弧线位置
- * Calculate Dock arc positions
- *
- * @description 根据插件数量和偏移量计算每个插件在弧线上的位置
- * Calculate each plugin's position on the arc based on count and offset
- *
- * @param count - 插件数量
- * @param offset - 滚动偏移量
- * @param centerIndex - 中心位置索引（默认 4）
- * @param centerIndex - Center position index (default: 4)
- *
- * @returns 插件位置数组
- * @returns Array of plugin positions
- *
- * @example
- * const positions = calculateDockPositions(9, 0)
- * // returns [{ x: 60, y: 20, isActive: false }, ...]
- */
+// 计算 Dock 弧线位置：根据插件数量和偏移量得到每个插件的坐标
+// Calculate dock arc positions from plugin count and offset
+// calculateDockPositions(9, 0) => [{ x: 60, y: 20, isActive: false }, ...]
 export function calculateDockPositions(
   count: number,
   offset: number,
@@ -487,8 +455,11 @@ main (生产环境 / Production)
 
 ### 3.2 提交规范 / Commit Standards
 
+**提交信息一律使用英文**。
+**Commit messages are always written in English.**
+
 ```
-<type>(<scope>): <subject> / <subject-en>
+<type>(<scope>): <subject>
 
 类型 / Type:
 - feat: 新功能 / New feature
@@ -501,13 +472,13 @@ main (生产环境 / Production)
 - chore: 构建/工具 / Build/Tools
 
 示例 / Example:
-feat(dock): 实现弧形布局 / Implement arc layout
-fix(plugin): 修复窗口关闭后状态未更新 / Fix state not updated after window close
-docs(readme): 更新安装说明 / Update installation guide
-test(workflow): 添加工作流执行测试 / Add workflow execution tests
-refactor(db): 优化数据库连接池 / Optimize database connection pool
-perf(dock): 优化弧线计算性能 / Optimize arc calculation performance
-chore(deps): 更新依赖版本 / Update dependencies
+feat(dock): implement arc layout
+fix(plugin): fix state not updated after window close
+docs(readme): update installation guide
+test(workflow): add workflow execution tests
+refactor(db): optimize database connection pool
+perf(dock): optimize arc calculation performance
+chore(deps): update dependencies
 ```
 
 ### 3.3 PR 模板 / PR Template
@@ -622,24 +593,20 @@ chore(deps): 更新依赖版本 / Update dependencies
 
 ```
 docs/
-├── README.md                    # 项目总览 / Project overview
-├── CHANGELOG.md                 # 版本变更记录 / Version changelog
-├── CONTRIBUTING.md              # 贡献指南 / Contributing guide
-├── ARCHITECTURE.md              # 架构设计 / Architecture design
-├── API.md                       # API 文档 / API documentation
-├── DEVELOPER.md                 # 开发者指南 / Developer guide
-├── USER_GUIDE.md                # 用户手册 / User manual
-├── DEPLOYMENT.md                # 部署指南 / Deployment guide
-├── tests/
-│   ├── TEST_PLAN.md             # 测试计划 / Test plan
-│   ├── TEST_CASES.md            # 测试用例 / Test cases
-│   └── TEST_REPORTS/            # 测试报告 / Test reports
-│       ├── YYYY-MM-DD_report.md
-│       └── YYYY-MM-DD_report.md
-└── migrations/
-    ├── 001_init.sql
-    ├── 002_workflow.sql
-    └── 003_plugin_data.sql
+├── README.md                    # 文档索引 / Doc index
+├── ARCHITECTURE.md              # 架构设计 / Architecture
+├── DATABASE.md                  # 数据库设计 / Database design
+├── PANEL.md                     # 主面板与设置 / Panel & settings
+├── DOCK.md                      # Dock 侧边栏 / Dock sidebar
+├── PLUGINS.md                   # 插件系统 / Plugin system
+├── WORKFLOW.md                  # 工作流系统 / Workflow system
+├── ROADMAP.md                   # 开发计划 / Roadmap
+└── tests/
+    ├── TEST_PLAN.md             # 测试计划 / Test plan
+    ├── TEST_CASES.md            # 测试用例 / Test cases
+    └── TEST_REPORTS/            # 测试报告 / Test reports
+        ├── YYYY-MM-DD_report.md
+        └── YYYY-MM-DD_report.md
 ```
 
 ### 5.3 CHANGELOG 模板 / CHANGELOG Template

@@ -1,11 +1,5 @@
-/**
- * @file index.css
- * @description 全局样式入口：Tailwind CSS v4 导入 + shadcn/ui 主题变量（由 shadcn init 生成）
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- */
-
+/* 全局样式入口：Tailwind CSS v4 导入 + shadcn/ui 主题变量 */
+/* Global styles: Tailwind CSS v4 import + shadcn/ui theme variables */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";

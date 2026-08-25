@@ -1,11 +1,5 @@
-/**
- * @file settings.test.ts
- * @description 设置解析纯函数单元测试 / Unit tests for settings parsing
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- */
-
+// 设置解析纯函数单元测试
+// Unit tests for the settings parsing pure functions
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_SETTINGS,
@@ -27,7 +21,8 @@ describe('设置解析 / parseRawSettings', () => {
     expect(result.theme).toBe('dark')
     expect(result.dock_enabled).toBe(false)
     expect(result.dock_hotzone_width).toBe(18)
-    // 未提供的 key 保持默认 / Untouched keys keep defaults
+    // 未提供的 key 保持默认
+    // Untouched keys keep defaults
     expect(result.language).toBe(DEFAULT_SETTINGS.language)
   })
 
@@ -38,6 +33,7 @@ describe('设置解析 / parseRawSettings', () => {
 
   it('类型不符回退默认值 / Type-mismatched value falls back', () => {
     // 布尔设置收到字符串 'true'（JSON 编码错误）→ 不采纳
+    // A boolean setting receiving the string 'true' is rejected
     const result = parseRawSettings({ dock_enabled: '"true"' })
     expect(result.dock_enabled).toBe(DEFAULT_SETTINGS.dock_enabled)
   })

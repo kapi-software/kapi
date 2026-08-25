@@ -1,16 +1,6 @@
-/**
- * @file Settings.tsx
- * @description 设置页：Phase 1 最小实现（语言 + 主题 + Dock 开关）
- * Settings page: Phase 1 minimal implementation (language + theme + dock toggle)
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 最小可用设置页
- * - 2026-08-25: 接入 i18n + 语言切换项
- */
-
+// 设置页：Phase 1 最小实现（语言 + 主题 + Dock 开关）
+// Settings page: Phase 1 minimal implementation (language + theme + dock toggle)
+// 设置项清单见 docs/PANEL.md
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -20,14 +10,16 @@ import { useSettingsStore } from "@/stores/settings";
 import { normalizeLanguage, SUPPORTED_LANGUAGES } from "@/i18n";
 import type { ThemeMode } from "@/lib/settings";
 
-/** 主题选项（值 → i18n key）/ Theme options (value → i18n key) */
+// 主题选项（值 → i18n key）
+// Theme options (value → i18n key)
 const THEME_OPTIONS: Array<{ value: ThemeMode; labelKey: string }> = [
   { value: "light", labelKey: "settings.themeLight" },
   { value: "dark", labelKey: "settings.themeDark" },
   { value: "system", labelKey: "settings.themeSystem" },
 ];
 
-/** 语言选项展示名（语言包自身的名字，不随界面语言变化）/ Native language display names */
+// 语言选项展示名（语言包自身的名字，不随界面语言变化）
+// Native language display names (do not change with the UI language)
 const LANGUAGE_NAMES: Record<string, string> = {
   "zh-CN": "简体中文",
   "en-US": "English",

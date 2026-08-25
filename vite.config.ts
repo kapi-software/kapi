@@ -1,14 +1,5 @@
-/**
- * @file vite.config.ts
- * @description Vite 构建配置：React 插件 + Tailwind CSS v4 + @/* 路径别名 + Tauri 开发服务器适配
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: 添加 Tailwind v4 插件与 @ 别名（Phase 1）
- */
-
+// Vite 构建配置：React 插件 + Tailwind CSS v4 + @/* 路径别名 + Tauri 开发服务器适配
+// Vite config: React plugin + Tailwind CSS v4 + @/* alias + Tauri dev server tweaks
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -22,6 +13,7 @@ export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
   // @/* 路径别名 → src/*（与 tsconfig.json paths 保持一致）
+  // @/* alias → src/* (keep in sync with tsconfig.json paths)
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -51,6 +43,7 @@ export default defineConfig(async () => ({
   },
 
   // Vitest 单元测试配置（纯函数测试，node 环境即可）
+  // Vitest unit test config (pure-function tests, node environment)
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],

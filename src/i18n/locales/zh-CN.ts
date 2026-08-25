@@ -1,15 +1,5 @@
-/**
- * @file zh-CN.ts
- * @description 简体中文语言包
- * Simplified Chinese locale pack
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 随 i18n 初始化创建
- */
-
+// 简体中文语言包
+// Simplified Chinese locale pack
 export default {
   app: {
     name: 'Kapi',
@@ -46,7 +36,7 @@ export default {
     sandboxStrict: '沙箱严格 / plugin_sandbox_strict',
     accentColor: '强调色 / accent_color',
     roadmapTitle: '路线图 / Roadmap',
-    roadmapDesc: '按 docs/plan.MD §10.1 推进',
+    roadmapDesc: '按 docs/ROADMAP.md 推进',
     phase1: 'Phase 1 · 项目初始化 + 数据库层（当前）',
     phase2: 'Phase 2 · 主面板框架 + 设置页',
     phase3: 'Phase 3 · Dock 侧边栏（仅唤醒）',
@@ -55,7 +45,7 @@ export default {
   },
   settings: {
     title: '设置 / Settings',
-    subtitle: '统一存储于 SQLite settings 表（plan §8）',
+    subtitle: '统一存储于 SQLite settings 表（docs/PANEL.md）',
     themeTitle: '主题 / Theme',
     themeDesc: 'light / dark / system，实时切换 html.dark',
     themeLight: '浅色',

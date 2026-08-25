@@ -1,16 +1,5 @@
-/**
- * @file App.tsx
- * @description 应用根组件：窗口分流、主题与语言应用、主面板布局与路由
- * Root component: window routing, theme & language application, panel layout and routes
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 主面板骨架（左侧导航 + 右侧内容区）
- * - 2026-08-25: 接入 i18n（导航文案 t() 化 + 语言同步 effect）
- */
-
+// 应用根组件：窗口分流、主题与语言应用、主面板布局与路由
+// Root component: window routing, theme & language application, panel layout and routes
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Outlet, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -36,7 +25,8 @@ import Workflow from "@/pages/Workflow";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
 
-/** 导航路由键 → i18n key 映射 / Nav route keys mapped to i18n keys（plan §4.1） */
+// 导航路由键 → i18n key 映射（docs/PANEL.md）
+// Nav route keys mapped to i18n keys (docs/PANEL.md)
 const NAV_ITEMS = [
   { to: "/", labelKey: "nav.home", icon: Home, end: true },
   { to: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
@@ -46,13 +36,10 @@ const NAV_ITEMS = [
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
 
-/**
- * 主面板布局：顶栏 + 左侧导航 + 内容区
- * Panel layout: top bar + left nav + content area
- *
- * Phase 2 将替换为 shadcn/ui Sidebar 组件
- * Will be replaced with the shadcn/ui Sidebar component in Phase 2
- */
+// 主面板布局：顶栏 + 左侧导航 + 内容区
+// Panel layout: top bar + left nav + content area
+// Phase 2 将替换为 shadcn/ui Sidebar 组件
+// To be replaced with the shadcn/ui Sidebar component in Phase 2
 function PanelLayout() {
   const { t } = useTranslation();
 
@@ -87,7 +74,8 @@ function PanelLayout() {
   );
 }
 
-/** 应用根组件：按窗口 label 分流 / Root component routing by window label */
+// 应用根组件：按窗口 label 分流
+// Root component: routes by window label
 export default function App() {
   const [entry, setEntry] = useState<"main" | "dock" | null>(null);
   const theme = useSettingsStore((s) => s.settings.theme);
@@ -95,7 +83,7 @@ export default function App() {
   const loadSettings = useSettingsStore((s) => s.loadSettings);
 
   // 启动时加载设置（含数据库连接）
-  // Load settings on startup (includes DB connection)
+  // Load settings on startup (includes the DB connection)
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
@@ -122,7 +110,7 @@ export default function App() {
   }, [language]);
 
   // 窗口分流：dock 窗口渲染 Dock UI（Phase 3 实现），其余渲染主面板
-  // Window routing: dock window renders the Dock UI (Phase 3), others the panel
+  // Window routing: the dock window renders the Dock UI (Phase 3), others the panel
   useEffect(() => {
     if (!isTauri()) {
       setEntry("main");
@@ -140,8 +128,8 @@ export default function App() {
 
   if (entry === null) return null;
 
-  // Dock 窗口：透明占位，Phase 3 按 plan §5 实现弧形 UI
-  // Dock window: transparent placeholder; arc UI lands in Phase 3 (plan §5)
+  // Dock 窗口：透明占位，Phase 3 按 docs/DOCK.md 实现弧形 UI
+  // Dock window: transparent placeholder; arc UI lands in Phase 3 (docs/DOCK.md)
   if (entry === "dock") {
     return <div className="h-screen w-screen bg-transparent" />;
   }

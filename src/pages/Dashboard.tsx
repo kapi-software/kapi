@@ -1,16 +1,5 @@
-/**
- * @file Dashboard.tsx
- * @description 首页仪表盘：Phase 1 展示数据库链路验证（迁移 → settings 表 → store）
- * Dashboard: Phase 1 database chain verification (migrations → settings table → store)
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 数据库链路验证页
- * - 2026-08-25: 接入 i18n
- */
-
+// 首页仪表盘：Phase 1 展示数据库链路验证（迁移 → settings 表 → store）
+// Dashboard: Phase 1 database chain verification (migrations → settings table → store)
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,7 +8,8 @@ import { isTauri } from "@/lib/tauri";
 import { settingsDb, initDb } from "@/lib/db";
 import { useSettingsStore } from "@/stores/settings";
 
-/** 数据库链路状态 / DB chain status */
+// 数据库链路状态
+// DB chain status
 type DbStatus = "checking" | "ok" | "failed" | "browser";
 
 export default function Dashboard() {

@@ -1,16 +1,5 @@
-/**
- * @file Logs.tsx
- * @description 日志页：system_logs 过滤查看，Phase 2 完善过滤与自动刷新
- * Logs page: system_logs viewer; filtering and auto-refresh land in Phase 2
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 基础日志页
- * - 2026-08-25: 接入 i18n
- */
-
+// 日志页：system_logs 查看，Phase 2 完善过滤与自动刷新
+// Logs page: system_logs viewer; filtering and auto-refresh land in Phase 2
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

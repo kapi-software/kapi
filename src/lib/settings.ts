@@ -1,18 +1,13 @@
-/**
- * @file settings.ts
- * @description 设置纯逻辑：默认值、原始值解析、主题解析（无副作用，可单元测试）
- * @author Kapi 开发团队 / Kapi Development Team
- * @created 2026-08-25
- * @updated 2026-08-25
- *
- * @changes
- * - 2026-08-25: Phase 1 初始实现
- */
+// 设置纯逻辑：默认值、原始值解析、主题解析（无副作用，可单元测试）
+// Settings pure logic: defaults, raw parsing, theme resolution (side-effect free, testable)
+// 设置项清单见 docs/PANEL.md
 
-/**
- * 应用设置类型 / App settings type
- * 与 migrations/002_defaults.sql 的种子项一一对应（plan §8.2）
- */
+// 主题模式
+// Theme mode
+export type ThemeMode = 'light' | 'dark' | 'system'
+
+// 应用设置类型，与 migrations/002_defaults.sql 种子项一一对应
+// App settings type, mirroring the seeds in 002_defaults.sql
 export interface AppSettings {
   // 通用 / General
   language: string
@@ -35,10 +30,8 @@ export interface AppSettings {
   plugin_log_level: 'debug' | 'info' | 'warn' | 'error'
 }
 
-/** 主题模式 / Theme mode */
-export type ThemeMode = 'light' | 'dark' | 'system'
-
-/** 默认设置（与 002_defaults.sql 保持一致）/ Defaults matching the SQL seed */
+// 默认设置（与 002_defaults.sql 保持一致）
+// Defaults matching 002_defaults.sql
 export const DEFAULT_SETTINGS: AppSettings = {
   language: 'zh-CN',
   auto_start: false,
@@ -57,20 +50,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   plugin_log_level: 'info',
 }
 
-/**
- * 解析数据库原始设置 / Parse raw settings from the settings table
- *
- * 规则：仅接受已知 key；值按 JSON 解析；解析失败或类型不符时回退默认值。
- * 纯函数，供 store 与单元测试使用。
- *
- * @param raw - settings 表的 key → JSON 字符串映射 / Raw key → JSON string map
- * @param defaults - 回退默认值（默认 DEFAULT_SETTINGS）/ Fallback defaults
- * @returns 合并后的完整设置 / Merged complete settings
- *
- * @example
- * parseRawSettings({ theme: '"dark"', unknown_key: '1' })
- * // => { ...DEFAULT_SETTINGS, theme: 'dark' }   // 未知 key 被忽略
- */
+// 解析数据库原始设置：
+// 仅接受已知 key；值按 JSON 解析；解析失败或类型不符时回退默认值
+// Parse raw settings from the settings table:
+// known keys only, values parsed as JSON, falling back to defaults on failure or type mismatch
+// parseRawSettings({ theme: '"dark"', unknown: '1' }) => { ...DEFAULT_SETTINGS, theme: 'dark' }
 export function parseRawSettings(
   raw: Record<string, string>,
   defaults: AppSettings = DEFAULT_SETTINGS
@@ -83,34 +67,25 @@ export function parseRawSettings(
 
     try {
       const parsed = JSON.parse(value) as unknown
-      // 类型守卫：与默认值类型一致才采纳 / Adopt only if type matches default
+      // 类型守卫：与默认值类型一致才采纳
+      // Adopt only if the type matches the default
       if (typeof parsed === typeof defaults[key]) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ;(result as any)[key] = parsed
       }
     } catch {
-      // 非法 JSON：保留默认值 / Invalid JSON: keep default
+      // 非法 JSON：保留默认值
+      // Invalid JSON: keep the default
     }
   }
 
   return result
 }
 
-/**
- * 解析主题为 html class / Resolve theme to an html class
- *
- * system 模式下的明暗由操作系统决定，此处仅返回 'dark' 或 null（跟随浅色），
- * 具体的 matchMedia 监听由副作用层（React hook）处理。
- *
- * @param mode - 主题模式 / Theme mode
- * @param prefersDark - system 模式下系统是否偏好深色 / OS preference (for 'system')
- * @returns 'dark' 或 null（浅色）/ 'dark' or null (light)
- *
- * @example
- * resolveThemeClass('dark')            // => 'dark'
- * resolveThemeClass('system', true)    // => 'dark'
- * resolveThemeClass('system', false)   // => null
- */
+// 解析主题为 html class：
+// system 模式下的明暗由操作系统决定（prefersDark），浅色返回 null
+// Resolve the theme to an html class; 'dark' or null (light)
+// resolveThemeClass('dark') => 'dark'; resolveThemeClass('system', true) => 'dark'
 export function resolveThemeClass(mode: ThemeMode, prefersDark = false): 'dark' | null {
   if (mode === 'dark') return 'dark'
   if (mode === 'light') return null
