@@ -22,7 +22,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 初始化项目（Tailwind v4 + shadcn/ui + Router + Zustand + vitest，2026-08-25）
 - [x] 实现数据库层（Rust 迁移 + 前端 db.ts，2026-08-25）
 - [x] i18n（react-i18next，zh-CN / en-US）
-- [ ] 实现主面板框架
+- [x] 实现主面板框架（分组导航 + 设置页全量设置项 + 强调色主题 + 日志过滤/自动刷新，2026-08-25）
 - [ ] 移植 Dock 侧边栏
 
 ## 3. 待开发清单
@@ -30,9 +30,10 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 项目初始化（Tauri + React 19 + Tailwind + shadcn/ui）
 - [x] 数据库迁移（tauri-plugin-sql Migration，Rust 侧唯一入口）
 - [x] i18n（react-i18next，zh-CN / en-US，语言切换持久化）
-- [ ] 主面板布局（侧边栏 + 内容区 + 路由）
-- [ ] 设置页面（统一 settings 表 + 实时生效：Dock 开关/主题/强调色）
-- [ ] 主题系统（light/dark/system + accent CSS 变量）
+- [x] 主面板布局（分组侧边栏 + 内容区 + 路由，2026-08-25）
+- [x] 设置页面（统一 settings 表全量设置项；主题/强调色实时生效，Dock 开关实时联动随 Phase 3 dock_service）
+- [x] 主题系统（light/dark/system + accent CSS 变量，2026-08-25）
+- [x] 日志页（级别过滤 + 自动刷新，2026-08-25）
 - [ ] Dock 窗口（边沿触发热区轮询 + motion 弧形前端 + 仅唤醒，见 DOCK.md）
 - [ ] kapi-plugin:// 自定义协议（静态资源服务 + 路径安全）
 - [ ] PluginHost（iframe + postMessage 桥接，内嵌/独立共用）
