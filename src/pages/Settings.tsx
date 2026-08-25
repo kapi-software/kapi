@@ -227,7 +227,7 @@ export default function Settings() {
           <CardDescription>{t("settings.themeDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="divide-y">
-          <SettingRow label={t("settings.themeTitle")} desc={t("settings.themeDesc")}>
+          <SettingRow label={t("settings.themeMode")} desc={t("settings.themeDesc")}>
             <div className="flex gap-2">
               {THEME_OPTIONS.map(({ value, labelKey }) => (
                 <Button

@@ -2,6 +2,7 @@
 export default {
   app: {
     name: 'Kapi',
+    tagline: 'Plugin platform',
   },
   nav: {
     home: 'Home',
@@ -57,6 +58,7 @@ export default {
     checkUpdateDesc: 'Check for new versions on startup',
     themeTitle: 'Theme',
     themeDesc: 'light / dark / system, toggles html.dark instantly',
+    themeMode: 'Theme mode',
     themeLight: 'Light',
     themeDark: 'Dark',
     themeSystem: 'System',

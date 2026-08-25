@@ -1,9 +1,24 @@
-// 主面板顶栏：拖拽区（无边框窗口）+ 窗口控制按钮
-// Panel top bar: drag region (frameless window) + window control buttons
+// 主面板顶栏：侧边栏切换按钮 + 面包屑（左）+ 窗口控制按钮（右），整条可拖拽
+// Panel top bar: sidebar trigger + breadcrumb (left) + window controls (right), fully draggable
+// 布局对应 shadcn sidebar-07：Trigger 与 Breadcrumb 位于 SidebarInset 顶栏
+// Layout follows shadcn sidebar-07: trigger and breadcrumb live in the SidebarInset header
+import { useTranslation } from "react-i18next";
+import { NavLink, useLocation } from "react-router-dom";
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useTranslation } from "react-i18next";
 import { isTauri } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { NAV_ITEMS, isNavItemActive } from "@/components/navigation/AppSidebar";
 
 // 窗口控制按钮组（仅 Tauri 环境渲染）
 // Window control buttons (rendered only inside Tauri)
@@ -41,7 +56,7 @@ function WindowControls() {
         <Square className="size-3" />
       </button>
       <button
-        className={`${btn} hover:bg-destructive hover:text-white`}
+        className={cn(btn, "hover:bg-destructive hover:text-white")}
         title={t("topbar.close")}
         onClick={(e) => {
           e.stopPropagation();
@@ -54,17 +69,46 @@ function WindowControls() {
   );
 }
 
-// 主面板顶栏：整条可拖拽 + 窗口控制
-// Draggable top bar with window controls
+// 面包屑：首页链接 + 当前页面；位于首页时只显示一项
+// Breadcrumb: home link + current page; collapses to one item on the home page
+function PageBreadcrumb() {
+  const { t } = useTranslation();
+  const { pathname } = useLocation();
+
+  const active = NAV_ITEMS.find(({ to, end }) => isNavItemActive(pathname, to, end));
+
+  return (
+    <Breadcrumb>
+      <BreadcrumbList>
+        {active?.to !== "/" && (
+          <>
+            <BreadcrumbItem className="hidden md:block">
+              <BreadcrumbLink asChild>
+                <NavLink to="/">{t("nav.home")}</NavLink>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="hidden md:block" />
+          </>
+        )}
+        <BreadcrumbItem>
+          <BreadcrumbPage>{t(active?.labelKey ?? "nav.home")}</BreadcrumbPage>
+        </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+}
+
+// 主面板顶栏：可拖拽（无边框窗口）+ 侧边栏切换 + 面包屑 + 窗口控制
+// Draggable top bar (frameless window) + sidebar toggle + breadcrumb + window controls
 export function TopBar() {
   return (
     <header
       data-tauri-drag-region
-      className="flex h-10 shrink-0 select-none items-center border-b px-3"
+      className="flex h-14 shrink-0 select-none items-center gap-2 border-b px-4"
     >
-      <span data-tauri-drag-region className="text-sm font-semibold tracking-wide">
-        Kapi
-      </span>
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-1 h-4" />
+      <PageBreadcrumb />
       <WindowControls />
     </header>
   );
