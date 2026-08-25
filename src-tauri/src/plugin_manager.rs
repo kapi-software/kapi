@@ -146,6 +146,15 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// 插件独立窗口 label：Tauri label 字符集不含 "."，反向域名 id 需替换为 "_"
+// Independent-window label: Tauri labels disallow "."; reverse-domain ids map dots to underscores
+// label 仅用于窗口查找 / 聚焦 / 关闭的确定性映射；插件 id 权威来源是窗口 URL 的路由参数
+// The label is only a deterministic handle for lookup/focus/close; the authoritative
+// plugin id travels in the window URL route
+fn plugin_window_label(plugin_id: &str) -> String {
+    format!("plugin-{}", plugin_id.replace('.', "_"))
+}
+
 // 共享 SQLite 连接池：前端 Database.load 创建（tauri-plugin-sql 状态），此处只取用
 // Shared SQLite pool: created by the frontend Database.load (tauri-plugin-sql state)
 // 插件未导出 sqlite() 访问器，直接匹配枚举变体；SqlitePool 为 Arc 句柄，克隆廉价
@@ -306,7 +315,7 @@ pub async fn plugin_uninstall(app: AppHandle, plugin_id: String) -> Result<(), S
         return Err(format!("插件不存在 / plugin not found: {plugin_id}"));
     }
 
-    if let Some(win) = app.get_webview_window(&format!("plugin-{plugin_id}")) {
+    if let Some(win) = app.get_webview_window(&plugin_window_label(&plugin_id)) {
         let _ = win.close();
     }
 
@@ -369,7 +378,7 @@ pub async fn launch_plugin(app: AppHandle, plugin_id: String) -> Result<(), Stri
         // 独立窗口：存在则聚焦，不存在按 manifest.window 创建
         // Independent: focus the existing window or create one per manifest.window
         "independent" => {
-            let label = format!("plugin-{plugin_id}");
+            let label = plugin_window_label(&plugin_id);
             if let Some(win) = app.get_webview_window(&label) {
                 win.show().map_err(|e| e.to_string())?;
                 win.set_focus().map_err(|e| e.to_string())?;
@@ -398,7 +407,7 @@ fn create_plugin_window(
         .and_then(|j| serde_json::from_str(j).ok())
         .unwrap_or_default();
 
-    let label = format!("plugin-{plugin_id}");
+    let label = plugin_window_label(plugin_id);
     let title = cfg.title.clone().unwrap_or_else(|| plugin_id.to_string());
     let url = WebviewUrl::App(format!("/plugin-window/{plugin_id}").into());
 
@@ -536,5 +545,24 @@ mod tests {
         let root = temp_dir_for("copy-missing");
         assert!(copy_dir_recursive(&root.join("nope"), &root.join("dst")).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn window_label_dots_are_sanitized() {
+        // Tauri label 禁止 "."：反向域名 id 必须映射为合法字符
+        // Tauri labels forbid ".": reverse-domain ids must map to legal characters
+        assert_eq!(
+            plugin_window_label("com.kapi.sample.plugin-a"),
+            "plugin-com_kapi_sample_plugin-a"
+        );
+        // 同一 id 重复计算结果一致（聚焦已有窗口依赖确定性）
+        // Repeated computation stays stable (focusing relies on determinism)
+        assert_eq!(
+            plugin_window_label("com.kapi.sample.plugin-a"),
+            plugin_window_label("com.kapi.sample.plugin-a")
+        );
+        // 无点 id 原样保留
+        // Dot-free ids pass through unchanged
+        assert_eq!(plugin_window_label("simple_id-1"), "plugin-simple_id-1");
     }
 }

@@ -7,10 +7,12 @@ import { isTauri } from "@/lib/tauri";
 
 export default function PluginWindowShell() {
   const { id: paramId } = useParams<{ id: string }>();
-  // id 权威来源是窗口 label（plugin-<id>）；路由参数作回退
-  // The window label (plugin-<id>) is authoritative; the route param is a fallback
+  // id 权威来源是路由参数（完整插件 id）；label 作回退（其中 "." 已被替换为 "_"，有损）
+  // The route param carries the authoritative plugin id; the label is a lossy
+  // fallback (its "." chars were replaced with "_" to satisfy Tauri label rules)
   const label = isTauri() ? getCurrentWindow().label : "";
-  const id = label.startsWith("plugin-") ? label.slice("plugin-".length) : paramId;
+  const labelId = label.startsWith("plugin-") ? label.slice("plugin-".length) : undefined;
+  const id = paramId ?? labelId?.replace(/_/g, ".");
 
   if (!id) return null;
 
