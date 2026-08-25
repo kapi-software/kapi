@@ -21,7 +21,7 @@ const MAX_EVENT_TYPE_LEN: usize = 128;
 
 // 权限守卫：manifest.permissions 的内存快照，默认全部拒绝（docs/PLUGINS.md §3）
 // Permission guard: in-memory snapshot of manifest.permissions, deny-by-default
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PermissionGuard {
     permissions: HashSet<String>,
 }
@@ -428,6 +428,29 @@ async fn events_emit(pool: &sqlx::SqlitePool, plugin_id: &str, payload: Value) -
     Ok(Value::Null)
 }
 
+// 写 system_logs 的公共入口（plugin_log / headless 启动 / WASM stderr 摘录共用）
+// Shared system_logs writer (used by plugin_log, headless launch and WASM stderr excerpts)
+pub(crate) async fn write_system_log(
+    pool: &sqlx::SqlitePool,
+    level: &str,
+    message: &str,
+    source: &str,
+    data: Option<Value>,
+) -> Result<(), String> {
+    let data = data
+        .map(|d| serde_json::to_string(&d).map_err(|e| format!("StorageError: {e}")))
+        .transpose()?;
+    sqlx::query("INSERT INTO system_logs (level, message, source, data) VALUES (?, ?, ?, ?)")
+        .bind(level)
+        .bind(message)
+        .bind(source)
+        .bind(&data)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("StorageError: {e}"))?;
+    Ok(())
+}
+
 // log.*：写入 system_logs，source 固定为 plugin:<id>（日志页可过滤）
 // log.*: append to system_logs with source = plugin:<id> (filterable in the logs page)
 async fn plugin_log(
@@ -438,18 +461,7 @@ async fn plugin_log(
 ) -> Result<Value, String> {
     let p: LogPayload = parse_payload(payload)?;
     validate_message(&p.message)?;
-    let data = p
-        .data
-        .map(|d| serde_json::to_string(&d).map_err(|e| format!("StorageError: {e}")))
-        .transpose()?;
-    sqlx::query("INSERT INTO system_logs (level, message, source, data) VALUES (?, ?, ?, ?)")
-        .bind(level)
-        .bind(&p.message)
-        .bind(format!("plugin:{plugin_id}"))
-        .bind(&data)
-        .execute(pool)
-        .await
-        .map_err(|e| format!("StorageError: {e}"))?;
+    write_system_log(pool, level, &p.message, &format!("plugin:{plugin_id}"), p.data).await?;
     Ok(Value::Null)
 }
 
@@ -464,6 +476,52 @@ fn ensure_own_window(window: &WebviewWindow, plugin_id: &str) -> Result<(), Stri
 }
 
 // ---- 命令与分发 / command and dispatch ----
+
+// 通道分发：UI 桥（plugin_bridge 命令）与 WASM 宿主导入（kapi_host_call）共用的唯一权限闸与路由
+// Channel dispatch: the single permission gate and routing shared by the UI bridge
+// and the WASM host import (kapi_host_call)
+// window.* 与 plugin.invoke 只允许 UI 路径（命令内先行处理），WASM 侧在此拒绝
+// window.* and plugin.invoke are UI-only (handled earlier in the command); denied here for WASM
+pub(crate) async fn dispatch_channel(
+    pool: &sqlx::SqlitePool,
+    guard: &PermissionGuard,
+    plugin_id: &str,
+    channel: &str,
+    payload: Value,
+) -> Result<Value, String> {
+    // 权限闸：先查映射表再过守卫（kapi:http.fetch 的域名白名单在 handler 内特判）
+    // Permission gate: map the channel, then consult the guard (http.fetch host check is in-handler)
+    if let Some(perm) = channel_permission(channel) {
+        guard.require(perm)?;
+    }
+
+    match channel {
+        "kapi:storage.get" => storage_get(pool, plugin_id, payload).await,
+        "kapi:storage.set" => storage_set(pool, plugin_id, payload).await,
+        "kapi:storage.remove" => storage_remove(pool, plugin_id, payload).await,
+        "kapi:clipboard.read" => clipboard_read().await,
+        "kapi:clipboard.write" => clipboard_write(payload).await,
+        "kapi:http.fetch" => http_fetch(guard, payload).await,
+        "kapi:events.emit" => events_emit(pool, plugin_id, payload).await,
+        "kapi:log.debug" | "kapi:log.info" | "kapi:log.warn" | "kapi:log.error" => {
+            // level 由通道名决定，无需（也不接受）payload 传入
+            // The channel name decides the level; payloads cannot override it
+            let level = channel.trim_start_matches("kapi:log.");
+            plugin_log(pool, plugin_id, level, payload).await
+        }
+        // 窗口控制属 UI 专属（需要 WebviewWindow 与自有窗口校验）
+        // Window control is UI-only (needs the WebviewWindow and own-window check)
+        "kapi:window.setTitle" | "kapi:window.close" | "kapi:window.minimize"
+        | "kapi:window.startDragging" => Err("WindowNotAllowed: window control is UI-only".into()),
+        // 禁止 WASM 内嵌套调用自己的 wasm 入口
+        // Nested self-invocation from WASM is forbidden
+        "kapi:plugin.invoke" => Err("WasmError: kapi:plugin.invoke is not callable from WASM".into()),
+        // 事件订阅需要 SDK 侧的推送协议，与 @kapi/plugin-sdk 同轮落地
+        // Subscription needs the SDK-side push protocol; lands with @kapi/plugin-sdk
+        "kapi:events.on" => Err("NotImplemented: event subscription lands with the plugin SDK".into()),
+        other => Err(format!("UnknownChannel: {other}")),
+    }
+}
 
 // 桥接统一入口：PluginHost（postMessage）→ invoke → 此处（docs/ARCHITECTURE.md §3.3）
 // Bridge entry point: PluginHost (postMessage) → invoke → here
@@ -483,26 +541,9 @@ pub async fn plugin_bridge(
     let pool = sqlite_pool(&app).await?;
     let ctx = load_bridge_context(&pool, &plugin_id).await?;
 
-    // 权限闸：先查映射表再过守卫（kapi:http.fetch 的域名白名单在 handler 内特判）
-    // Permission gate: map the channel, then consult the guard (http.fetch host check is in-handler)
-    if let Some(perm) = channel_permission(&channel) {
-        ctx.guard.require(perm)?;
-    }
-
     match channel.as_str() {
-        "kapi:storage.get" => storage_get(&pool, &plugin_id, payload).await,
-        "kapi:storage.set" => storage_set(&pool, &plugin_id, payload).await,
-        "kapi:storage.remove" => storage_remove(&pool, &plugin_id, payload).await,
-        "kapi:clipboard.read" => clipboard_read().await,
-        "kapi:clipboard.write" => clipboard_write(payload).await,
-        "kapi:http.fetch" => http_fetch(&ctx.guard, payload).await,
-        "kapi:events.emit" => events_emit(&pool, &plugin_id, payload).await,
-        "kapi:log.debug" | "kapi:log.info" | "kapi:log.warn" | "kapi:log.error" => {
-            // level 由通道名决定，无需（也不接受）payload 传入
-            // The channel name decides the level; payloads cannot override it
-            let level = channel.trim_start_matches("kapi:log.");
-            plugin_log(&pool, &plugin_id, level, payload).await
-        }
+        // 窗口控制仅 UI 路径可用（需调用方 WebviewWindow）
+        // Window control is available only on the UI path (needs the caller's WebviewWindow)
         "kapi:window.setTitle" => {
             ensure_own_window(&window, &plugin_id)?;
             let p: WindowSetTitlePayload = parse_payload(payload)?;
@@ -530,12 +571,9 @@ pub async fn plugin_bridge(
         "kapi:plugin.invoke" => Err(
             "NotImplemented: kapi:plugin.invoke requires the WASM runtime".into(),
         ),
-        // 事件订阅需要 SDK 侧的推送协议，与 @kapi/plugin-sdk 同轮落地
-        // Subscription needs the SDK-side push protocol; lands with @kapi/plugin-sdk
-        "kapi:events.on" => {
-            Err("NotImplemented: event subscription lands with the plugin SDK".into())
-        }
-        other => Err(format!("UnknownChannel: {other}")),
+        // 其余通道全部委托共享分发（storage/clipboard/http/events/log）
+        // Everything else delegates to the shared dispatch (storage/clipboard/http/events/log)
+        _ => dispatch_channel(&pool, &ctx.guard, &plugin_id, &channel, payload).await,
     }
 }
 
