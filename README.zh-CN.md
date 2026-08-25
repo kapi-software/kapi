@@ -96,3 +96,7 @@ pnpm tauri build
 开发规范请参阅 [CLAUDE.md](CLAUDE.md)。
 
 ---
+
+## 📄 许可证
+
+本项目基于 [MIT 许可证](LICENSE) 开源 · 版权所有 (c) 2026 Kapi Development Team
