@@ -1,0 +1,83 @@
+/**
+ * Kapi Tauri 配置（JSON5 格式）
+ *
+ * 为什么是 .json5 而不是 .json：
+ * 本机透明加密软件（TSD 头）会加密受信进程写入的 .json/.txt 文件，
+ * 导致 cargo（非受信进程）读到密文、构建失败；.json5 不在加密策略内。
+ * 对应地，Cargo.toml 为 tauri / tauri-build 启用了 config-json5 feature，
+ * capability 采用配置内联（app.security.capabilities）而非 capabilities/*.json。
+ */
+{
+  $schema: "https://schema.tauri.app/config/2",
+  productName: "Kapi",
+  version: "0.1.0",
+  identifier: "com.kapi.app",
+  build: {
+    beforeDevCommand: "pnpm dev",
+    devUrl: "http://localhost:1420",
+    beforeBuildCommand: "pnpm build",
+    frontendDist: "../dist",
+  },
+  app: {
+    windows: [
+      // 主面板：对齐 Electron panel（1200×1000，无边框自绘标题栏，关闭=隐藏复用）
+      {
+        label: "main",
+        title: "Kapi",
+        width: 1200,
+        height: 1000,
+        decorations: false,
+        visible: true,
+      },
+      // Dock：完整参数见 docs/plan.MD §5.1；位置由 Rust 启动时按光标所在显示器计算
+      {
+        label: "dock",
+        width: 320,
+        height: 560,
+        transparent: true,
+        decorations: false,
+        shadow: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        visible: false,
+        resizable: false,
+      },
+    ],
+    security: {
+      csp: null,
+      // 内联 capability（替代 capabilities/default.json，避免 .json 被本机加密软件加密）
+      capabilities: [
+        {
+          identifier: "default",
+          description: "主面板与 Dock 窗口的默认能力 / Capability for main and dock windows",
+          windows: ["main", "dock"],
+          permissions: [
+            "core:default",
+            "opener:default",
+            "sql:default",
+            "core:window:allow-minimize",
+            "core:window:allow-maximize",
+            "core:window:allow-unmaximize",
+            "core:window:allow-toggle-maximize",
+            "core:window:allow-close",
+            "core:window:allow-hide",
+            "core:window:allow-show",
+            "core:window:allow-set-focus",
+            "core:window:allow-start-dragging",
+          ],
+        },
+      ],
+    },
+  },
+  bundle: {
+    active: true,
+    targets: "all",
+    icon: [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+    ],
+  },
+}
