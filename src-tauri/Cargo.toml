@@ -31,6 +31,17 @@ serde_json = "1"
 # 与 tauri-plugin-sql 共用同一连接池（DbInstances），版本需与其 0.8 对齐
 # Shares the pool with tauri-plugin-sql (DbInstances); must stay on its 0.8 line
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
+# 插件桥接：剪贴板（Rust 侧专用，官方剪贴板插件内部同为 arboard，且不暴露 JS 面）
+# Plugin bridge: clipboard (Rust-side only; the official clipboard plugin wraps arboard too)
+arboard = "3"
+# 插件桥接：kapi:http.fetch 宿主代理（域名白名单预检；rustls 免 Linux openssl 依赖）
+# Plugin bridge: the kapi:http.fetch host proxy (behind the host whitelist; rustls avoids openssl)
+# 版本对齐锁内 tauri 传递依赖 0.13，避免双版本编译；webpki-roots 内置根证书免系统依赖
+# Aligned with the transitive 0.13 already in the lockfile; webpki-roots bundles the CA store
+# 注：0.13 起 feature 更名（rustls-tls → rustls + webpki-roots）
+# Note: features were renamed in 0.13 (rustls-tls -> rustls + webpki-roots)
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots"] }
+url = "2"
 
 # Dock 光标轮询（docs/DOCK.md §4）：仅 Windows 需要 Win32 API
 # Dock cursor polling (docs/DOCK.md §4): Win32 API needed on Windows only

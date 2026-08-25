@@ -2,6 +2,7 @@
 // Kapi app entry: plugin registration, DB migrations, protocol, commands, dock service, system tray
 mod db;
 mod dock;
+mod plugin_bridge;
 mod plugin_manager;
 mod plugin_protocol;
 mod tray;
@@ -33,6 +34,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dock::dock_set_config,
+            plugin_bridge::plugin_bridge,
             plugin_manager::plugin_install,
             plugin_manager::plugin_uninstall,
             plugin_manager::launch_plugin,
