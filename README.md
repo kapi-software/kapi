@@ -1,9 +1,10 @@
-
 # Kapi
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-orange.svg)](https://tauri.app)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 
 A Tauri-based plugin-oriented desktop application with unified plugin management and workflow orchestration.
 
@@ -13,11 +14,12 @@ A Tauri-based plugin-oriented desktop application with unified plugin management
 
 | Module | Description | Status |
 | ------ | ----------- | :----: |
-| **Main Panel** | Navigation sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area. Built with React 19 + shadcn/ui. | ✅ Phase 1 |
-| **Dock Sidebar** | Arc-shaped launcher on the right screen edge. **Wakes plugins only** (aligned with Electron version). | Phase 3 |
-| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. Supports embedded, standalone, and headless run modes. | Phase 4 |
+| **Main Panel** | Navigation sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area. Built with React 19 + shadcn/ui. | ✅ Done |
+| **Dock Sidebar** | Arc-shaped launcher on the right screen edge with hotzone polling. **Wakes plugins only** (dispatch lives in Rust). | ✅ Done |
+| **System Tray** | Resident app: close-to-tray, panel / settings / quit menu. | ✅ Done |
+| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. `kapi-plugin://` protocol, install/uninstall/enable/mode switch, embedded & independent window hosts. | 🔨 In progress |
 | **Workflow System** | Trigger-based DAG step graphs for cross-plugin data flow (e.g., clipboard watch → beautify & save → screenshot). | Phase 6 |
-| **Local Database** | SQLite via `tauri-plugin-sql`. Single migration entry point on the Rust side. | ✅ Phase 1 |
+| **Local Database** | SQLite via `tauri-plugin-sql`. Single migration entry point on the Rust side. | ✅ Done |
 
 ---
 
@@ -68,20 +70,32 @@ pnpm tauri build
 
 ## 📁 Project Structure
 
-```
+```text
 ├── src/                        # Frontend source
-│   ├── components/             # UI components (navigation, shadcn/ui)
-│   ├── pages/                  # Pages (Dashboard / Plugins / Store / Workflow / Logs / Settings)
-│   ├── i18n/                   # Internationalization (locales/zh-CN.ts, en-US.ts)
-│   ├── lib/                    # db.ts (data access), settings.ts (logic), tauri.ts (bridge)
-│   ├── stores/                 # Zustand stores
+│   ├── components/
+│   │   ├── ui/                 # shadcn/ui primitives
+│   │   ├── navigation/         # AppSidebar, TopBar
+│   │   └── plugin/             # PluginHost (iframe host)
+│   ├── dock/                   # Dock window UI (arc layout)
+│   ├── pages/                  # Dashboard / Plugins / PluginEmbedView /
+│   │                           # PluginWindowShell / Store / Workflow / Logs / Settings
+│   ├── stores/                 # Zustand stores (settings, plugins)
+│   ├── i18n/                   # Locales (zh-CN.ts, en-US.ts)
+│   ├── lib/                    # db.ts, plugin-url.ts, settings.ts, dock-arc.ts, tauri.ts
 │   └── types/                  # Global TypeScript types
 │
 ├── src-tauri/                  # Backend (Rust)
-│   ├── migrations/             # SQLite migrations (001_schema.sql, 002_defaults.sql)
-│   ├── src/                    # Rust source (db.rs, migration assembly, etc.)
+│   ├── migrations/             # SQLite migrations (001_init.sql, 002_defaults.sql)
+│   ├── src/
+│   │   ├── lib.rs              # Builder assembly (plugins, protocol, commands)
+│   │   ├── db.rs               # Migration assembly
+│   │   ├── dock.rs             # Hotzone polling + window positioning
+│   │   ├── tray.rs             # System tray
+│   │   ├── plugin_protocol.rs  # kapi-plugin:// protocol (path-safe static serving)
+│   │   └── plugin_manager.rs   # Install / uninstall / launch dispatch
 │   └── tauri.conf.json5        # Tauri configuration (JSON5, inline capabilities)
 │
+├── plugins/                    # Sample plugin fixtures (pluginA / pluginB)
 └── docs/                       # Design documentation (Chinese)
 ```
 

@@ -2,6 +2,10 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-orange.svg)](https://tauri.app)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
+
 一款基于 Tauri 的插件化桌面应用，提供统一的插件管理和工作流编排能力。
 
 ---
@@ -10,11 +14,12 @@
 
 | 模块 | 描述 | 状态 |
 | ------ | ----------- | :----: |
-| **主面板** | 导航侧边栏（首页 / 插件 / 商店 / 工作流 / 日志 / 设置）+ 内容区域。基于 React 19 + shadcn/ui 构建。 | ✅ 第一阶段 |
-| **停靠侧边栏** | 位于屏幕右侧边缘的弧形启动器。**仅用于唤醒插件**（与 Electron 版本一致）。 | 第三阶段 |
-| **插件系统** | WASM 沙箱化逻辑（wasmtime）+ Web UI。支持嵌入、独立和无头三种运行模式。 | 第四阶段 |
-| **工作流系统** | 基于触发器的 DAG 步骤图，支持跨插件数据流（例如：剪贴板监听 → 美化并保存 → 截图）。 | 第六阶段 |
-| **本地数据库** | 通过 `tauri-plugin-sql` 使用 SQLite。Rust 侧统一管理迁移入口。 | ✅ 第一阶段 |
+| **主面板** | 导航侧边栏（首页 / 插件 / 商店 / 工作流 / 日志 / 设置）+ 内容区域。基于 React 19 + shadcn/ui 构建。 | ✅ 已完成 |
+| **Dock 侧边栏** | 屏幕右缘弧形启动栏，热区轮询触发。**仅负责唤醒插件**（分发逻辑集中在 Rust）。 | ✅ 已完成 |
+| **系统托盘** | 驻留运行：关闭即收入托盘，提供主面板 / 设置 / 退出菜单。 | ✅ 已完成 |
+| **插件系统** | WASM 沙箱逻辑（wasmtime）+ Web UI。`kapi-plugin://` 协议、安装/卸载/启停/模式切换、内嵌与独立窗口宿主。 | 🔨 开发中 |
+| **工作流系统** | 基于触发器的 DAG 步骤图，支持跨插件数据流（例如：剪贴板监听 → 美化并保存 → 截图）。 | Phase 6 |
+| **本地数据库** | 通过 `tauri-plugin-sql` 使用 SQLite。Rust 侧统一管理迁移入口。 | ✅ 已完成 |
 
 ---
 
@@ -65,20 +70,32 @@ pnpm tauri build
 
 ## 📁 项目结构
 
-```
+```text
 ├── src/                        # 前端源码
-│   ├── components/             # UI 组件（导航、shadcn/ui）
-│   ├── pages/                  # 页面（仪表盘 / 插件 / 商店 / 工作流 / 日志 / 设置）
-│   ├── i18n/                   # 国际化（locales/zh-CN.ts、en-US.ts）
-│   ├── lib/                    # db.ts（数据访问）、settings.ts（逻辑）、tauri.ts（桥接）
-│   ├── stores/                 # Zustand 状态仓库
+│   ├── components/
+│   │   ├── ui/                 # shadcn/ui 基础组件
+│   │   ├── navigation/         # AppSidebar、TopBar
+│   │   └── plugin/             # PluginHost（iframe 插件宿主）
+│   ├── dock/                   # Dock 窗口 UI（弧形布局）
+│   ├── pages/                  # 仪表盘 / 插件 / 插件内嵌视图 /
+│   │                           # 插件独立窗口壳 / 商店 / 工作流 / 日志 / 设置
+│   ├── stores/                 # Zustand 状态仓库（settings、plugins）
+│   ├── i18n/                   # 语言包（zh-CN.ts、en-US.ts）
+│   ├── lib/                    # db.ts、plugin-url.ts、settings.ts、dock-arc.ts、tauri.ts
 │   └── types/                  # 全局 TypeScript 类型定义
 │
 ├── src-tauri/                  # 后端（Rust）
-│   ├── migrations/             # SQLite 迁移文件（001_schema.sql、002_defaults.sql）
-│   ├── src/                    # Rust 源码（db.rs、迁移组装等）
+│   ├── migrations/             # SQLite 迁移文件（001_init.sql、002_defaults.sql）
+│   ├── src/
+│   │   ├── lib.rs              # Builder 装配（插件注册、协议、命令）
+│   │   ├── db.rs               # 迁移组装
+│   │   ├── dock.rs             # 热区轮询 + 窗口定位
+│   │   ├── tray.rs             # 系统托盘
+│   │   ├── plugin_protocol.rs  # kapi-plugin:// 协议（路径安全静态服务）
+│   │   └── plugin_manager.rs   # 安装 / 卸载 / 启动分发
 │   └── tauri.conf.json5        # Tauri 配置（JSON5，内联 capabilities）
 │
+├── plugins/                    # 示例插件（pluginA / pluginB）
 └── docs/                       # 设计文档（中文）
 ```
 
