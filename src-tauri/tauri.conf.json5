@@ -55,6 +55,9 @@
             "core:default",
             "opener:default",
             "sql:default",
+            // sql:default 仅含 load/close/select：写操作（设置保存等）需显式放行
+            // sql:default covers load/close/select only: writes (settings saves) need explicit grant
+            "sql:allow-execute",
             "core:window:allow-minimize",
             "core:window:allow-maximize",
             "core:window:allow-unmaximize",
