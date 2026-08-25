@@ -1,81 +1,126 @@
+
 # Kapi
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A Tauri-based plugin-oriented desktop application providing unified plugin management and workflow orchestration.
+A Tauri-based plugin-oriented desktop application with unified plugin management and workflow orchestration.
 
-## Features
+---
+
+## ✨ Features
 
 | Module | Description | Status |
-| ------ | ----------- | ------ |
-| **Main Panel** | Nav sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area, React 19 + shadcn/ui | Phase 1 ✅ |
-| **Dock Sidebar** | Arc-shaped launcher at the right screen edge; **wakes plugins only** (aligned with the Electron version) | Phase 3 |
-| **Plugin System** | WASM sandboxed logic (wasmtime) + web UI; embedded / independent / headless run modes | Phase 4 |
-| **Workflow System** | Triggers + DAG step graphs linking data across plugins (e.g. clipboard watch → beautify & save → screenshot) | Phase 6 |
-| **Local Database** | SQLite (tauri-plugin-sql) with a single Rust-side migration entry point | Phase 1 ✅ |
+| ------ | ----------- | :----: |
+| **Main Panel** | Navigation sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area. Built with React 19 + shadcn/ui. | ✅ Phase 1 |
+| **Dock Sidebar** | Arc-shaped launcher on the right screen edge. **Wakes plugins only** (aligned with Electron version). | Phase 3 |
+| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. Supports embedded, standalone, and headless run modes. | Phase 4 |
+| **Workflow System** | Trigger-based DAG step graphs for cross-plugin data flow (e.g., clipboard watch → beautify & save → screenshot). | Phase 6 |
+| **Local Database** | SQLite via `tauri-plugin-sql`. Single migration entry point on the Rust side. | ✅ Phase 1 |
 
-## Tech Stack
+---
 
-- **Framework**: Tauri v2 + Rust
-- **Frontend**: React 19 + TypeScript + Vite
-- **Styling**: Tailwind CSS v4 + shadcn/ui
-- **State**: Zustand · **Routing**: React Router v7 · **Animation**: motion
-- **i18n**: react-i18next (zh-CN / en-US, TS locale modules)
-- **Testing**: Vitest
+## 🧰 Tech Stack
+
+- **Framework**: Tauri v2 + Rust  
+- **Frontend**: React 19 + TypeScript + Vite  
+- **Styling**: Tailwind CSS v4 + shadcn/ui  
+- **State Management**: Zustand  
+- **Routing**: React Router v7  
+- **Animation**: motion  
+- **i18n**: react-i18next (zh-CN / en-US, TypeScript locale modules)  
+- **Testing**: Vitest  
 - **Database**: SQLite (tauri-plugin-sql, migrations in `src-tauri/migrations/`)
 
-## Getting Started
+---
+
+## 🚀 Getting Started
 
 ```bash
 # Install dependencies
 pnpm install
 
-# Dev mode (full Tauri app)
+# Run in development mode (full Tauri app)
 pnpm tauri dev
 
-# Frontend only (browser preview, no Tauri IPC)
+# Run frontend only (browser preview, no Tauri IPC)
 pnpm dev
 
-# Unit tests
+# Run unit tests
 pnpm test
 
-# Frontend build check
+# Build frontend (check only)
 pnpm build
 
-# Release build
+# Build release app
 pnpm tauri build
 ```
 
-Prerequisites: Node 18+, pnpm, Rust stable, Windows/macOS/Linux (see [Tauri prerequisites](https://tauri.app/start/prerequisites/)).
+### Prerequisites
 
-## Project Structure
+- Node.js 18+  
+- pnpm  
+- Rust (stable channel)  
+- Windows / macOS / Linux (see [Tauri prerequisites](https://tauri.app/start/prerequisites/))
 
-```text
-├── src/                        # Frontend
-│   ├── components/             #   Components (navigation / ui(shadcn))
-│   ├── pages/                  #   Pages (Dashboard / Plugins / Store / Workflow / Logs / Settings)
-│   ├── i18n/                   #   i18n (locales/zh-CN.ts · en-US.ts)
-│   ├── lib/                    #   db.ts access layer · settings.ts pure logic · tauri.ts bridge
-│   ├── stores/                 #   Zustand stores
-│   └── types/                  #   Global types
-├── src-tauri/
-│   ├── migrations/             # SQLite migrations (001 schema · 002 defaults)
-│   ├── src/                    # Rust (db.rs migration assembly, etc.)
-│   └── tauri.conf.json5        # Tauri config (JSON5, inline capabilities)
-└── docs/                       # Design docs (Chinese)
+---
+
+## 📁 Project Structure
+
+```
+├── src/                        # Frontend source
+│   ├── components/             # UI components (navigation, shadcn/ui)
+│   ├── pages/                  # Pages (Dashboard / Plugins / Store / Workflow / Logs / Settings)
+│   ├── i18n/                   # Internationalization (locales/zh-CN.ts, en-US.ts)
+│   ├── lib/                    # db.ts (data access), settings.ts (logic), tauri.ts (bridge)
+│   ├── stores/                 # Zustand stores
+│   └── types/                  # Global TypeScript types
+│
+├── src-tauri/                  # Backend (Rust)
+│   ├── migrations/             # SQLite migrations (001_schema.sql, 002_defaults.sql)
+│   ├── src/                    # Rust source (db.rs, migration assembly, etc.)
+│   └── tauri.conf.json5        # Tauri configuration (JSON5, inline capabilities)
+│
+└── docs/                       # Design documentation (Chinese)
 ```
 
-## Documentation
+---
 
-Design docs (in Chinese) live under [`docs/`](docs/README.md):
+## 📚 Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture, window model, plugin launch flow, technical implementation
-- [docs/DATABASE.md](docs/DATABASE.md) — SQLite schema (8 tables), migrations, access layer
-- [docs/PANEL.md](docs/PANEL.md) · [docs/DOCK.md](docs/DOCK.md) · [docs/PLUGINS.md](docs/PLUGINS.md) · [docs/WORKFLOW.md](docs/WORKFLOW.md) — module designs
-- [docs/ROADMAP.md](docs/ROADMAP.md) — milestones, task checklist, risks
+Design docs (in Chinese) are available in the [`docs/`](docs/README.md) folder:
 
-Development standards: [CLAUDE.md](CLAUDE.md)
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture, window model, plugin launch flow, technical implementation  
+- [DATABASE.md](docs/DATABASE.md) — SQLite schema (8 tables), migrations, data access layer  
+- [PANEL.md](docs/PANEL.md) · [DOCK.md](docs/DOCK.md) · [PLUGINS.md](docs/PLUGINS.md) · [WORKFLOW.md](docs/WORKFLOW.md) — Module-specific designs  
+- [ROADMAP.md](docs/ROADMAP.md) — Milestones, task checklist, risk assessment  
 
-## License
+For development standards, see [CLAUDE.md](CLAUDE.md).
 
-Private project
+---
+
+## 📄 License
+
+MIT License
+
+Copyright (c) 2026 Kapi Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy  
+of this software and associated documentation files (the "Software"), to deal  
+in the Software without restriction, including without limitation the rights  
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell  
+copies of the Software, and to permit persons to whom the Software is  
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all  
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR  
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,  
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE  
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER  
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  
+SOFTWARE.
+```
+
+
