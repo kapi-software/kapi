@@ -2,80 +2,97 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-基于 Tauri 的插件化桌面应用，提供统一的插件管理和工作流编排能力。
+一款基于 Tauri 的插件化桌面应用，提供统一的插件管理和工作流编排能力。
 
-## 功能概览
+---
 
-| 模块 | 说明 | 阶段 |
-| ---- | ---- | ---- |
-| **主面板** | 左侧导航（首页/插件/市场/工作流/日志/设置）+ 右侧内容区，React 19 + shadcn/ui | Phase 1 ✅ |
-| **Dock 侧边栏** | 屏幕右缘弧形快速启动栏，**仅负责唤醒插件**（对齐 Electron 版行为） | Phase 3 |
-| **插件系统** | WASM 沙箱逻辑（wasmtime）+ Web UI，embedded / independent / headless 三种运行模式 | Phase 4 |
-| **工作流系统** | 触发器 + DAG 步骤图，插件间数据联动（如剪贴板监听 → 代码美化保存 → 截图生成） | Phase 6 |
-| **本地数据库** | SQLite（tauri-plugin-sql），Rust 侧唯一迁移入口 | Phase 1 ✅ |
+## ✨ 功能模块
 
-## 技术栈
+| 模块 | 描述 | 状态 |
+| ------ | ----------- | :----: |
+| **主面板** | 导航侧边栏（首页 / 插件 / 商店 / 工作流 / 日志 / 设置）+ 内容区域。基于 React 19 + shadcn/ui 构建。 | ✅ 第一阶段 |
+| **停靠侧边栏** | 位于屏幕右侧边缘的弧形启动器。**仅用于唤醒插件**（与 Electron 版本一致）。 | 第三阶段 |
+| **插件系统** | WASM 沙箱化逻辑（wasmtime）+ Web UI。支持嵌入、独立和无头三种运行模式。 | 第四阶段 |
+| **工作流系统** | 基于触发器的 DAG 步骤图，支持跨插件数据流（例如：剪贴板监听 → 美化并保存 → 截图）。 | 第六阶段 |
+| **本地数据库** | 通过 `tauri-plugin-sql` 使用 SQLite。Rust 侧统一管理迁移入口。 | ✅ 第一阶段 |
+
+---
+
+## 🧰 技术栈
 
 - **框架**：Tauri v2 + Rust
 - **前端**：React 19 + TypeScript + Vite
 - **样式**：Tailwind CSS v4 + shadcn/ui
-- **状态**：Zustand；**路由**：React Router v7；**动画**：motion
-- **i18n**：react-i18next（zh-CN / en-US，TS 语言包）
+- **状态管理**：Zustand
+- **路由**：React Router v7
+- **动画**：motion
+- **国际化**：react-i18next（zh-CN / en-US，TypeScript 语言包模块）
 - **测试**：Vitest
-- **数据库**：SQLite（tauri-plugin-sql，迁移见 `src-tauri/migrations/`）
+- **数据库**：SQLite（tauri-plugin-sql，迁移文件位于 `src-tauri/migrations/`）
 
-## 快速开始
+---
+
+## 🚀 快速开始
 
 ```bash
 # 安装依赖
 pnpm install
 
-# 开发模式（启动完整 Tauri 应用）
+# 开发模式运行（完整 Tauri 应用）
 pnpm tauri dev
 
-# 仅前端（浏览器预览，无 Tauri IPC）
+# 仅运行前端（浏览器预览，无 Tauri IPC）
 pnpm dev
 
-# 单元测试
+# 运行单元测试
 pnpm test
 
-# 前端构建检查
+# 构建前端（仅检查）
 pnpm build
 
-# 发布构建
+# 构建发布版应用
 pnpm tauri build
 ```
 
-环境要求：Node 18+、pnpm、Rust stable、Windows/macOS/Linux（详见 [Tauri 环境准备](https://tauri.app/start/prerequisites/)）。
+### 环境要求
 
-## 项目结构
+- Node.js 18+
+- pnpm
+- Rust（稳定版）
+- Windows / macOS / Linux（参见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)）
 
-```text
-├── src/                        # 前端
-│   ├── components/             #   组件（navigation / ui(shadcn)）
-│   ├── pages/                  #   页面（Dashboard / Plugins / Store / Workflow / Logs / Settings）
-│   ├── i18n/                   #   国际化（locales/zh-CN.ts · en-US.ts）
-│   ├── lib/                    #   db.ts 数据访问层 · settings.ts 纯逻辑 · tauri.ts 桥接
-│   ├── stores/                 #   Zustand stores
-│   └── types/                  #   全局类型
-├── src-tauri/
-│   ├── migrations/             # SQLite 迁移（001 建表 · 002 默认设置）
-│   ├── src/                    # Rust（db.rs 迁移装配等）
-│   └── tauri.conf.json5        # Tauri 配置（JSON5，capability 内联）
-└── docs/                       # 设计文档
+---
+
+## 📁 项目结构
+
+```
+├── src/                        # 前端源码
+│   ├── components/             # UI 组件（导航、shadcn/ui）
+│   ├── pages/                  # 页面（仪表盘 / 插件 / 商店 / 工作流 / 日志 / 设置）
+│   ├── i18n/                   # 国际化（locales/zh-CN.ts、en-US.ts）
+│   ├── lib/                    # db.ts（数据访问）、settings.ts（逻辑）、tauri.ts（桥接）
+│   ├── stores/                 # Zustand 状态仓库
+│   └── types/                  # 全局 TypeScript 类型定义
+│
+├── src-tauri/                  # 后端（Rust）
+│   ├── migrations/             # SQLite 迁移文件（001_schema.sql、002_defaults.sql）
+│   ├── src/                    # Rust 源码（db.rs、迁移组装等）
+│   └── tauri.conf.json5        # Tauri 配置（JSON5，内联 capabilities）
+│
+└── docs/                       # 设计文档（中文）
 ```
 
-## 文档
+---
 
-设计文档位于 [`docs/`](docs/README.md)：
+## 📚 文档
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 架构、窗口模型、插件启动流程、技术实现
-- [docs/DATABASE.md](docs/DATABASE.md) —— SQLite 设计（8 表）、迁移、访问层
-- [docs/PANEL.md](docs/PANEL.md) · [docs/DOCK.md](docs/DOCK.md) · [docs/PLUGINS.md](docs/PLUGINS.md) · [docs/WORKFLOW.md](docs/WORKFLOW.md) —— 各模块设计
-- [docs/ROADMAP.md](docs/ROADMAP.md) —— 里程碑、任务清单、风险表
+设计文档（中文）位于 [`docs/`](docs/README.md) 文件夹：
 
-开发规范：[CLAUDE.md](CLAUDE.md)
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 系统架构、窗口模型、插件启动流程、技术实现
+- [DATABASE.md](docs/DATABASE.md) —— SQLite 表结构（8 张表）、迁移、数据访问层
+- [PANEL.md](docs/PANEL.md) · [DOCK.md](docs/DOCK.md) · [PLUGINS.md](docs/PLUGINS.md) · [WORKFLOW.md](docs/WORKFLOW.md) —— 各模块详细设计
+- [ROADMAP.md](docs/ROADMAP.md) —— 里程碑、任务清单、风险评估
 
-## 许可
+开发规范请参阅 [CLAUDE.md](CLAUDE.md)。
 
-私有项目
+---
