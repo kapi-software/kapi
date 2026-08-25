@@ -1,7 +1,7 @@
 // 应用根组件：窗口分流、主题与语言应用、主面板布局与路由
 // Root component: window routing, theme & language application, panel layout and routes
 import { useEffect, useState, type CSSProperties } from "react";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet, useNavigate } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -26,6 +26,20 @@ import Settings from "@/pages/Settings";
 // 主面板布局（shadcn sidebar-16）：全宽顶栏置顶 + 经典侧边栏 + 滚动内容区
 // Panel layout (shadcn sidebar-16): full-width header on top, classic sidebar, scrolling content
 function PanelLayout() {
+  const navigate = useNavigate();
+
+  // 托盘「设置」菜单 → Rust 发来 app:navigate，主窗口内跳转对应路由
+  // Tray "Settings" menu → Rust emits app:navigate; the main window routes accordingly
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen<string>("app:navigate", (e) => {
+      navigate(e.payload);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [navigate]);
+
   return (
     // sidebar-16：纵向排列（顶栏在上），侧边栏固定面板经 --header-height 下移
     // sidebar-16: column layout (header first); the sidebar's fixed panel shifts below via --header-height
@@ -112,6 +126,15 @@ export default function App() {
       expandDelayMs: dockExpandDelay,
     }).catch((e) => console.error("dock_set_config 失败 / failed:", e));
   }, [dockEnabled, dockPosition, dockHotzoneWidth, dockExpandDelay]);
+
+  // 托盘菜单语言推送：跟随 settings.language 实时重建托盘文案
+  // Tray language push: rebuild tray labels live with settings.language
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke("tray_set_language", { language }).catch((e) =>
+      console.error("tray_set_language 失败 / failed:", e)
+    );
+  }, [language]);
 
   // 主题应用：light/dark/system → html.dark class（shadcn 约定）
   // Theme application: light/dark/system → html.dark class (shadcn convention)

@@ -1,7 +1,8 @@
-// Kapi 应用装配入口：Tauri 插件注册、数据库迁移、命令注册、Dock 服务
-// Kapi app entry: Tauri plugin registration, DB migrations, commands, dock service
+// Kapi 应用装配入口：插件注册、数据库迁移、命令注册、Dock 服务、系统托盘
+// Kapi app entry: plugin registration, DB migrations, commands, dock service, system tray
 mod db;
 mod dock;
+mod tray;
 
 use std::sync::Mutex;
 
@@ -16,17 +17,32 @@ pub fn run() {
                 .add_migrations("sqlite:kapi.db", db::migrations())
                 .build(),
         )
-        // Dock 轮询配置（前端经 dock_set_config 推送 settings 变更）
-        // Dock polling config (frontend pushes settings changes via dock_set_config)
+        // Dock 轮询配置 + 托盘语言（前端经命令推送变更）
+        // Dock polling config + tray language (frontend pushes changes via commands)
         .manage(Mutex::new(dock::DockConfig::default()))
+        .manage(tray::TrayState::default())
         .invoke_handler(tauri::generate_handler![
             dock::dock_set_config,
-            dock::launch_plugin
+            dock::launch_plugin,
+            tray::tray_set_language
         ])
+        // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单
+        // Closing the main window hides it to the tray; quit lives in the tray menu only
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             // Dock 服务：启动定位 + 热区轮询线程（docs/DOCK.md）
             // Dock service: startup positioning + hotzone polling thread (docs/DOCK.md)
             dock::start(app.handle().clone());
+            // 系统托盘：驻留运行 + 主面板/设置/退出菜单
+            // System tray: resident app + panel/settings/quit menu
+            tray::init(app.handle())?;
             Ok(())
         })
         .run(tauri::generate_context!())
