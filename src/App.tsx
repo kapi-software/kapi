@@ -9,7 +9,7 @@ import { accentVars } from "@/lib/theme";
 import { normalizeLanguage } from "@/i18n";
 import i18n from "@/i18n";
 import { useSettingsStore } from "@/stores/settings";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/navigation/AppSidebar";
 import { TopBar } from "@/components/navigation/TopBar";
 import DockApp from "@/dock/Dock";
@@ -20,29 +20,31 @@ import Workflow from "@/pages/Workflow";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
 
-// 主面板布局：官方 Sidebar（inset 变体）+ SidebarInset 内容区（shadcn sidebar-07）
-// Panel layout: official Sidebar (inset variant) + SidebarInset content (shadcn sidebar-07)
+// 主面板布局（shadcn sidebar-16）：全宽顶栏置顶 + 经典侧边栏 + 滚动内容区
+// Panel layout (shadcn sidebar-16): full-width header on top, classic sidebar, scrolling content
 function PanelLayout() {
   return (
-    // 覆盖官方默认宽度：展开 16rem→12rem，图标态保持 3rem（仅此处声明，官方组件不改）
-    // Override the official width: expanded 16rem→12rem, icon rail keeps the 3rem default (declared only here, vendored file untouched)
+    // sidebar-16：纵向排列（顶栏在上），侧边栏固定面板经 --header-height 下移
+    // sidebar-16: column layout (header first); the sidebar's fixed panel shifts below via --header-height
+    // 宽度覆盖：展开 16rem→12rem，图标态保持 3rem（仅此处声明，官方组件不改）
+    // Width overrides: expanded 16rem→12rem, icon rail keeps 3rem (declared only here)
     <SidebarProvider
+      className="flex h-svh flex-col"
       style={
         {
+          "--header-height": "calc(var(--spacing) * 14)",
           "--sidebar-width": "12rem",
           "--sidebar-width-icon": "3rem",
         } as CSSProperties
       }
     >
-      <AppSidebar />
-      {/* inset 变体在 md+ 有 m-2 外边距：高度须扣除 1rem，否则窗口级出现常驻滚动条 */}
-      {/* The inset variant adds m-2 margins on md+: subtract 1rem or the window keeps a permanent scrollbar */}
-      <SidebarInset className="h-svh max-h-svh md:h-[calc(100svh-1rem)] md:max-h-[calc(100svh-1rem)]">
-        <TopBar />
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6">
+      <TopBar />
+      <div className="flex min-h-0 flex-1">
+        <AppSidebar />
+        <main className="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6">
           <Outlet />
-        </div>
-      </SidebarInset>
+        </main>
+      </div>
     </SidebarProvider>
   );
 }

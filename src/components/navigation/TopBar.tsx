@@ -1,15 +1,15 @@
-// 主面板顶栏：侧边栏切换按钮 + 面包屑（左）+ 窗口控制按钮（右），整条可拖拽
-// Panel top bar: sidebar trigger + breadcrumb (left) + window controls (right), fully draggable
-// 布局对应 shadcn sidebar-07：Trigger 与 Breadcrumb 位于 SidebarInset 顶栏
-// Layout follows shadcn sidebar-07: trigger and breadcrumb live in the SidebarInset header
+// 主面板顶栏（sidebar-16 布局）：全宽置顶，侧边栏切换 + 面包屑 + 搜索 + 窗口控制
+// Panel top bar (sidebar-16 layout): full-width on top with sidebar toggle, breadcrumb, search and window controls
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router-dom";
-import { Minus, Square, X } from "lucide-react";
+import { Minus, PanelLeft, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { SearchForm } from "@/components/search-form";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -34,7 +34,7 @@ function WindowControls() {
     "flex size-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
   return (
-    <div className="ml-auto flex items-center gap-0.5">
+    <div className="flex shrink-0 items-center gap-0.5">
       <button
         className={btn}
         title={t("topbar.minimize")}
@@ -78,16 +78,16 @@ function PageBreadcrumb() {
   const active = NAV_ITEMS.find(({ to, end }) => isNavItemActive(pathname, to, end));
 
   return (
-    <Breadcrumb>
+    <Breadcrumb className="hidden sm:block">
       <BreadcrumbList>
         {active?.to !== "/" && (
           <>
-            <BreadcrumbItem className="hidden md:block">
+            <BreadcrumbItem>
               <BreadcrumbLink asChild>
                 <NavLink to="/">{t("nav.home")}</NavLink>
               </BreadcrumbLink>
             </BreadcrumbItem>
-            <BreadcrumbSeparator className="hidden md:block" />
+            <BreadcrumbSeparator />
           </>
         )}
         <BreadcrumbItem>
@@ -98,18 +98,35 @@ function PageBreadcrumb() {
   );
 }
 
-// 主面板顶栏：可拖拽（无边框窗口）+ 侧边栏切换 + 面包屑 + 窗口控制
-// Draggable top bar (frameless window) + sidebar toggle + breadcrumb + window controls
+// 主面板顶栏：可拖拽（无边框窗口）+ 侧边栏切换 + 面包屑 + 搜索 + 窗口控制
+// Draggable top bar (frameless) + sidebar toggle + breadcrumb + search + window controls
 export function TopBar() {
+  const { t } = useTranslation();
+  const { toggleSidebar } = useSidebar();
+
   return (
     <header
       data-tauri-drag-region
-      className="flex h-14 shrink-0 select-none items-center gap-2 border-b px-4"
+      className="z-50 flex shrink-0 items-center border-b bg-background"
     >
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-1 h-4" />
-      <PageBreadcrumb />
-      <WindowControls />
+      <div data-tauri-drag-region className="flex h-(--header-height) w-full items-center gap-2 px-4">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleSidebar();
+          }}
+        >
+          <PanelLeft />
+          <span className="sr-only">{t("topbar.toggleSidebar")}</span>
+        </Button>
+        <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+        <PageBreadcrumb />
+        <SearchForm className="w-full sm:ml-auto sm:w-auto" />
+        <WindowControls />
+      </div>
     </header>
   );
 }

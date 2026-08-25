@@ -1,5 +1,5 @@
-// 应用侧边栏：官方 Sidebar 组件（inset + 图标折叠模式）+ 分组导航
-// App sidebar: official Sidebar component (inset + icon collapse) with grouped nav
+// 应用侧边栏（sidebar-16 布局）：经典实体侧边栏，从全宽顶栏下方开始
+// App sidebar (sidebar-16 layout): classic solid sidebar starting below the full-width header
 // 分组定义见 docs/PANEL.md §1；面包屑复用本文件的 NAV_GROUPS
 // Group definitions follow docs/PANEL.md §1; the breadcrumb reuses NAV_GROUPS below
 import { useTranslation } from "react-i18next";
@@ -73,7 +73,12 @@ export function AppSidebar() {
   const { pathname } = useLocation();
 
   return (
-    <Sidebar collapsible="icon" variant="inset">
+    // sidebar-16：固定面板从顶栏下方开始（--header-height 由 SidebarProvider 注入）
+    // sidebar-16: the fixed panel starts below the header (--header-height injected by SidebarProvider)
+    <Sidebar
+      collapsible="icon"
+      className="top-(--header-height) h-[calc(100svh-var(--header-height))]!"
+    >
       {/* 应用名：点击回首页；图标折叠模式下自动缩为 Logo */}
       {/* App name: click returns home; collapses to the logo in icon mode */}
       <SidebarHeader>
@@ -121,10 +126,6 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
-
-      {/* 右缘隐形轨道：悬停可收起/展开，与顶栏触发按钮等效 */}
-      {/* Invisible edge rail: hover to toggle, equivalent to the header trigger */}
-      {/* <SidebarRail /> */}
     </Sidebar>
   );
 }
