@@ -134,4 +134,26 @@
   html {
     @apply font-sans;
     }
+
+  /* 细滚动条：内容区与侧边栏悬停区共用，适配 inset 圆角卡片观感 */
+  /* Thin scrollbars shared by the content area and sidebar hover zone, matching the inset card look */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    }
+  *::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: var(--border);
+    }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+    }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+    }
 }

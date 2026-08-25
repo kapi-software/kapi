@@ -25,9 +25,11 @@ function PanelLayout() {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset className="h-svh max-h-svh">
+      {/* inset 变体在 md+ 有 m-2 外边距：高度须扣除 1rem，否则窗口级出现常驻滚动条 */}
+      {/* The inset variant adds m-2 margins on md+: subtract 1rem or the window keeps a permanent scrollbar */}
+      <SidebarInset className="h-svh max-h-svh md:h-[calc(100svh-1rem)] md:max-h-[calc(100svh-1rem)]">
         <TopBar />
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6">
           <Outlet />
         </div>
       </SidebarInset>
