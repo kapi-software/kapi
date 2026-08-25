@@ -1,7 +1,8 @@
-// Kapi 应用装配入口：插件注册、数据库迁移、命令注册、Dock 服务、系统托盘
-// Kapi app entry: plugin registration, DB migrations, commands, dock service, system tray
+// Kapi 应用装配入口：插件注册、数据库迁移、协议注册、命令注册、Dock 服务、系统托盘
+// Kapi app entry: plugin registration, DB migrations, protocol, commands, dock service, system tray
 mod db;
 mod dock;
+mod plugin_protocol;
 mod tray;
 
 use std::sync::Mutex;
@@ -21,6 +22,11 @@ pub fn run() {
         // Dock polling config + tray language (frontend pushes changes via commands)
         .manage(Mutex::new(dock::DockConfig::default()))
         .manage(tray::TrayState::default())
+        // kapi-plugin:// 协议：插件 web/ 静态资源服务（docs/ARCHITECTURE.md §3.4）
+        // kapi-plugin:// protocol: plugin web/ static asset serving (docs/ARCHITECTURE.md §3.4)
+        .register_uri_scheme_protocol(plugin_protocol::SCHEME, |ctx, request| {
+            plugin_protocol::handle(ctx.app_handle(), request)
+        })
         .invoke_handler(tauri::generate_handler![
             dock::dock_set_config,
             dock::launch_plugin,

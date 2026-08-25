@@ -280,18 +280,24 @@ async fn plugin_bridge(
 }
 ```
 
-### 3.4 自定义协议（插件 UI 资源服务）
+### 3.4 自定义协议（插件 UI 资源服务）——已实现
 
-```rust
-// src-tauri/src/plugin_protocol.rs（示意）
-// 注册 kapi-plugin 协议，将插件静态资源映射到安装目录：
-//   kapi-plugin://localhost/<plugin_id>/<path>  →  {app_data}/plugins/<plugin_id>/web/<path>
-//
-// 安全要求：
-//   1. 路径规范化，拒绝包含 ".." 的穿越请求
-//   2. 仅允许 web/ 子目录，main.wasm 等逻辑文件不可经协议访问
-//   3. 响应带正确 Content-Type；默认 no-store 避免更新后缓存旧资源
+`src-tauri/src/plugin_protocol.rs` 注册 `kapi-plugin` 协议，将插件静态资源映射到安装目录：
+
+```text
+kapi-plugin://localhost/<plugin_id>/<path>        (macOS/Linux)
+http://kapi-plugin.localhost/<plugin_id>/<path>   (Windows / WebView2)
+    →  {app_data}/plugins/<plugin_id>/web/<path>
 ```
+
+前端统一用 `src/lib/plugin-url.ts` 的 `pluginAssetUrl()` 构造 URL（自动适配平台形式）。插件根路径回退 `index.html`；仅接受 GET 请求。
+
+安全规则（均有单元测试覆盖，`cargo test --lib`）：
+
+1. 百分号解码后再做词法校验：拒绝 `..`（含 `%2e%2e` 编码形式）、反斜杠、非法 plugin_id 字符集（`[A-Za-z0-9._-]`）与非 UTF-8 输入
+2. 仅允许 `web/` 子目录，`manifest.json` / `main.wasm` 等逻辑文件不可经协议访问
+3. canonicalize 双保险：解析符号链接后必须仍位于该插件 `web/` 根内，防符号链接逃逸
+4. 响应带正确 Content-Type；`Cache-Control: no-store` 避免插件更新后缓存旧资源；错误响应固定文案，不回显路径
 
 ### 3.5 窗口配置（tauri.conf.json5）
 
