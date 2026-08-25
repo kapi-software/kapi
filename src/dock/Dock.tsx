@@ -5,12 +5,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@/lib/tauri";
 import { initDb, pluginDb } from "@/lib/db";
-import { calculateDockPositions, DOCK_WIDTH, DOCK_HEIGHT } from "@/lib/dock-arc";
+import {
+  calculateDockPositions,
+  DOCK_WIDTH,
+  DOCK_HEIGHT,
+  type DockSide,
+} from "@/lib/dock-arc";
 import { useSettingsStore } from "@/stores/settings";
 import type { Plugin } from "@/types";
 
@@ -111,7 +116,8 @@ function DockDot({
 export default function DockApp() {
   const { t } = useTranslation();
   const settings = useSettingsStore((s) => s.settings);
-  const { dock_enabled, dock_visible_items, dock_animation_speed, dock_auto_hide_delay } = settings;
+  const { dock_enabled, dock_visible_items, dock_animation_speed, dock_position } = settings;
+  const side: DockSide = dock_position === "left" ? "left" : "right";
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [offset, setOffset] = useState(0);
@@ -155,23 +161,18 @@ export default function DockApp() {
     };
   }, []);
 
-  // Tauri：推送 Dock 设置给 Rust 轮询服务（启用开关 + 自动隐藏延迟）
-  // Tauri: push dock settings to the Rust polling service
+  // Tauri：推送 Dock 设置给 Rust 轮询服务（启用开关 + 贴靠边）
+  // Tauri: push dock settings to the Rust polling service (enable switch + attach side)
   useEffect(() => {
     if (!isTauri()) return;
     invoke("dock_set_config", {
       enabled: dock_enabled,
-      autoHideMs: dock_auto_hide_delay,
+      position: side,
     }).catch((e) => console.error("dock_set_config 失败 / failed:", e));
-  }, [dock_enabled, dock_auto_hide_delay]);
+  }, [dock_enabled, side]);
 
-  // 浏览器预览：本地展开/自动收起（Tauri 下由 Rust 轮询负责）
-  // Browser preview: local expand/auto-collapse (Rust polling owns this in Tauri)
-  useEffect(() => {
-    if (isTauri() || !expanded) return;
-    const timer = setTimeout(() => setExpanded(false), dock_auto_hide_delay);
-    return () => clearTimeout(timer);
-  }, [expanded, dock_auto_hide_delay, isTauri()]);
+  // 浏览器预览：光标离开容器即收起（Tauri 下由 Rust 下降沿负责）
+  // Browser preview: collapse when the cursor leaves the container (falling edge in Tauri)
 
   // 滚轮循环滚动：仅展开态响应（docs/DOCK.md §2.2），需 preventDefault 故用原生监听
   // Wheel cycling: only when expanded (docs/DOCK.md §2.2); native listener to preventDefault
@@ -194,8 +195,15 @@ export default function DockApp() {
     : DEMO_ITEMS.map(({ id, nameKey, icon }) => ({ id, name: t(nameKey), icon }));
   const visibleCount = Math.max(1, Math.min(dock_visible_items, items.length));
   const positions = useMemo(
-    () => calculateDockPositions(visibleCount, offset, items.length),
-    [visibleCount, offset, items.length]
+    () =>
+      calculateDockPositions(
+        visibleCount,
+        offset,
+        items.length,
+        Math.floor(visibleCount / 2),
+        side
+      ),
+    [visibleCount, offset, items.length, side]
   );
   const duration = SPEED_SECONDS[dock_animation_speed];
 
@@ -221,9 +229,14 @@ export default function DockApp() {
       ref={containerRef}
       className="relative overflow-hidden select-none"
       style={{ width: DOCK_WIDTH, height: DOCK_HEIGHT }}
+      onMouseLeave={() => {
+        // 浏览器预览：光标离开即收起（与 Rust 行为一致）
+        // Browser preview: collapse on leave (matches Rust behavior)
+        if (!isTauri()) setExpanded(false);
+      }}
     >
-      {/* 弧形轨道：左半弧虚线（docs/DOCK.md §2.3）*/}
-      {/* Arc track: dashed left half arc (docs/DOCK.md §2.3) */}
+      {/* 弧形轨道：虚线（右贴靠凸向左，左贴靠镜像凸向右；docs/DOCK.md §2.3）*/}
+      {/* Arc track: dashed (bulges left when attached right, mirrored otherwise) */}
       <AnimatePresence>
         {expanded && (
           <motion.svg
@@ -237,7 +250,11 @@ export default function DockApp() {
             transition={{ duration }}
           >
             <path
-              d={`M ${DOCK_WIDTH} 0 A ${DOCK_WIDTH} ${DOCK_HEIGHT / 2} 0 0 0 ${DOCK_WIDTH} ${DOCK_HEIGHT}`}
+              d={
+                side === "right"
+                  ? `M ${DOCK_WIDTH} 0 A ${DOCK_WIDTH} ${DOCK_HEIGHT / 2} 0 0 0 ${DOCK_WIDTH} ${DOCK_HEIGHT}`
+                  : `M 0 0 A ${DOCK_WIDTH} ${DOCK_HEIGHT / 2} 0 0 1 0 ${DOCK_HEIGHT}`
+              }
               fill="none"
               stroke="rgba(255,255,255,0.08)"
               strokeWidth={1}
@@ -268,10 +285,12 @@ export default function DockApp() {
           })}
       </AnimatePresence>
 
-      {/* 箭头触发器：12×150 贴右缘垂直居中，hover 展宽 16px（docs/DOCK.md §2.3）*/}
-      {/* Arrow trigger: 12x150 at the right edge, widens to 16px on hover */}
+      {/* 箭头触发器：12×150 贴靠边垂直居中，hover 展宽 16px（docs/DOCK.md §2.3）*/}
+      {/* Arrow trigger: 12x150 on the attached edge, widens to 16px on hover */}
       <motion.div
-        className="absolute top-1/2 right-0 flex -translate-y-1/2 cursor-pointer items-center justify-center rounded-l-xl bg-zinc-900/70 backdrop-blur-md"
+        className={`absolute top-1/2 flex -translate-y-1/2 cursor-pointer items-center justify-center bg-zinc-900/70 backdrop-blur-md ${
+          side === "right" ? "right-0 rounded-l-xl" : "left-0 rounded-r-xl"
+        }`}
         initial={false}
         animate={{ width: triggerHover || expanded ? 16 : 12, height: 150 }}
         transition={{ duration: 0.16, ease: "easeOut" }}
@@ -289,7 +308,13 @@ export default function DockApp() {
           transition={{ duration: 0.12, ease: ARROW_SPRING }}
           className="text-white/80"
         >
-          <ChevronLeft className="size-3" />
+          {/* 箭头指向屏幕外侧：右贴靠用左箭头，左贴靠镜像 */}
+          {/* Arrow points outward: left chevron when attached right, mirrored on the left */}
+          {side === "right" ? (
+            <ChevronLeft className="size-3" />
+          ) : (
+            <ChevronRight className="size-3" />
+          )}
         </motion.span>
       </motion.div>
     </div>

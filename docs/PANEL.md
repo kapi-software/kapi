@@ -127,9 +127,12 @@ export function PluginHost({ pluginId }: { pluginId: string }) {
 | | 热区宽度 | `dock_hotzone_width` | 6–24 px |
 | | 动画速度 | `dock_animation_speed` | `slow` / `medium` / `fast` |
 | | 展开延迟 | `dock_expand_delay` | ms |
-| | 自动隐藏延迟 | `dock_auto_hide_delay` | ms |
 | | 可见数量 | `dock_visible_items` | 5–13 |
-| | 位置 | `dock_position` | `right`（预留 left） |
+| | 位置 | `dock_position` | `right` / `left`（主显示器贴靠边，切换实时重定位） |
+
+> `dock_auto_hide_delay` 已废弃（2026-08-25 需求变更：光标在 Dock 内即保持展开，
+> 无延迟自动收起）。settings 表种子保留以兼容，设置 UI 已移除。
+> `dock_auto_hide_delay` is deprecated (changed 2026-08-25: no delayed auto-hide).
 | **插件** | 自动更新 | `plugin_auto_update` | bool |
 | | 沙箱严格模式 | `plugin_sandbox_strict` | bool（true 时未签名插件拒绝加载） |
 | | 日志级别 | `plugin_log_level` | `debug` / `info` / `warn` / `error` |

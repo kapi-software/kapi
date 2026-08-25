@@ -338,20 +338,6 @@ export default function Settings() {
             />
           </SliderRow>
           <SliderRow
-            label={t("settings.dockAutoHideDelay")}
-            valueText={`${settings.dock_auto_hide_delay} ms`}
-            dimmed={dockDisabled}
-          >
-            <Slider
-              value={[settings.dock_auto_hide_delay]}
-              min={1000}
-              max={10000}
-              step={500}
-              disabled={dockDisabled}
-              onValueChange={([v]) => updateSetting("dock_auto_hide_delay", v)}
-            />
-          </SliderRow>
-          <SliderRow
             label={t("settings.dockVisibleItems")}
             desc={t("settings.dockVisibleDesc")}
             valueText={String(settings.dock_visible_items)}

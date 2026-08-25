@@ -17,19 +17,39 @@ const POLL_INTERVAL_MS: u64 = 100;
 const COOLDOWN_MS: u64 = 120;
 const HOTZONE_WIDTH: i32 = 12;
 
+// Dock 贴靠边（settings.dock_position：right / left）
+// Dock attach side (settings.dock_position: right / left)
+#[derive(Clone, Copy, PartialEq)]
+enum DockSide {
+    Left,
+    Right,
+}
+
+impl DockSide {
+    fn parse(s: &str) -> Self {
+        // 未知值一律回退右侧（与前端默认一致）
+        // Unknown values fall back to right (frontend default)
+        if s.eq_ignore_ascii_case("left") {
+            DockSide::Left
+        } else {
+            DockSide::Right
+        }
+    }
+}
+
 // 前端推送的 Dock 配置（settings 表镜像，经 dock_set_config 命令进入）
 // Dock config pushed by the frontend (mirror of the settings table via dock_set_config)
 #[derive(Clone)]
 pub struct DockConfig {
     pub enabled: bool,
-    pub auto_hide_ms: u64,
+    pub position: String,
 }
 
 impl Default for DockConfig {
     fn default() -> Self {
-        // 与前端 DEFAULT_SETTINGS.dock_auto_hide_delay 一致
-        // Matches DEFAULT_SETTINGS.dock_auto_hide_delay on the frontend
-        Self { enabled: false, auto_hide_ms: 3000 }
+        // position 与前端 DEFAULT_SETTINGS.dock_position 一致
+        // position matches DEFAULT_SETTINGS.dock_position
+        Self { enabled: false, position: "right".into() }
     }
 }
 
@@ -45,18 +65,19 @@ enum DockState {
 // 启动入口：定位 Dock 窗口并启动轮询线程
 // Entry point: position the dock window and start the polling thread
 pub fn start(app: AppHandle) {
-    // 定位一次：光标所在显示器 workArea 右缘、垂直居中，之后不再移动（docs/DOCK.md §1）
-    // Position once: right edge of the cursor's monitor workArea, vertically centered
+    // 初始定位：主显示器 workArea 右缘（默认侧）、垂直居中；运行期随 dock_position 实时切换
+    // Initial placement: default side of the primary monitor workArea; repositions live with dock_position
     if let Some(dock) = app.get_webview_window("dock") {
-        if let Some((x, y)) = initial_position() {
-            let _ = dock.set_position(PhysicalPosition::new(x, y));
-        }
+        let scale = dock.scale_factor().unwrap_or(1.0);
+        position_dock(&dock, DockSide::Right, scale);
     }
     std::thread::spawn(move || poll_loop(app));
 }
 
 // 轮询主循环：100ms 边沿触发热区检测（docs/DOCK.md §4 伪代码对齐）
 // Polling loop: 100ms edge-triggered hotzone detection (aligned with docs/DOCK.md §4)
+// 无自动收起：光标在 Dock 内即保持展开，离开才收（2026-08-25 需求变更）
+// No auto-hide: stays expanded while the cursor is inside (changed 2026-08-25)
 fn poll_loop(app: AppHandle) {
     let mut state = DockState::Hidden;
     let mut was_in_hotzone = false;
@@ -64,19 +85,33 @@ fn poll_loop(app: AppHandle) {
     // Collapsed starts pass-through; pass_through only dedupes system calls
     let mut pass_through = true;
     let mut last_change = Instant::now();
-    let mut hide_deadline: Option<Instant> = None;
+    // 已应用的贴靠边：None = 尚未定位，首轮即按当前配置定位
+    // Applied attach side: None = not yet positioned; the first tick positions per config
+    let mut applied_side: Option<DockSide> = None;
 
     loop {
         std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
 
         let Some(dock) = app.get_webview_window("dock") else { continue };
         let config = app.state::<Mutex<DockConfig>>().inner().lock().unwrap().clone();
+        let side = DockSide::parse(&config.position);
+        let scale = dock.scale_factor().unwrap_or(1.0);
+
+        // dock_position 变更 → 主显示器上实时换边（docs/PANEL.md §4.2）
+        // dock_position changed → reposition live on the primary monitor
+        if applied_side != Some(side) {
+            position_dock(&dock, side, scale);
+            applied_side = Some(side);
+            state = DockState::Hidden;
+            was_in_hotzone = false;
+            last_change = Instant::now();
+            let _ = app.emit("dock:state", "hidden");
+        }
 
         // §3.5 启用开关：禁用 → 收起并整窗隐藏；轮询重置热区观察值
         // §3.5 enable switch: disable → collapse and hide; reset the hotzone observation
         if !config.enabled {
             state = DockState::Hidden;
-            hide_deadline = None;
             if dock.is_visible().unwrap_or(false) {
                 let _ = dock.hide();
             }
@@ -101,16 +136,20 @@ fn poll_loop(app: AppHandle) {
             continue;
         }
 
-        let Some((cx, cy)) = cursor_position() else { continue };
+        // macOS 光标为逻辑坐标，需按窗口缩放换算成物理像素与 outer_position 对齐
+        // macOS cursor is in points; convert to physical pixels to match outer_position
+        let Some((cx, cy)) = cursor_position(scale) else { continue };
         let Ok(pos) = dock.outer_position() else { continue };
 
         let in_window_y = cy >= pos.y && cy <= pos.y + DOCK_H;
-        // 热区几何随状态变化：收起态仅右缘条带，展开态整窗（docs/DOCK.md §4）
-        // Hotzone geometry varies by state: collapsed = right strip only, expanded = whole window
+        // 收起态热区 = 贴靠边的 12px 条带（右贴右条带、左贴左条带）；展开态 = 整窗
+        // Collapsed hotzone = the 12px strip on the attached edge; expanded = the whole window
+        let in_strip = match side {
+            DockSide::Right => cx >= pos.x + DOCK_W - HOTZONE_WIDTH && cx <= pos.x + DOCK_W,
+            DockSide::Left => cx >= pos.x && cx <= pos.x + HOTZONE_WIDTH,
+        };
         let in_hotzone = match state {
-            DockState::Hidden | DockState::Peeking => {
-                in_window_y && cx >= pos.x + DOCK_W - HOTZONE_WIDTH && cx <= pos.x + DOCK_W
-            }
+            DockState::Hidden | DockState::Peeking => in_window_y && in_strip,
             DockState::Expanded => in_window_y && cx >= pos.x && cx <= pos.x + DOCK_W,
         };
 
@@ -122,7 +161,6 @@ fn poll_loop(app: AppHandle) {
                 pass_through = false;
                 state = DockState::Expanded;
                 last_change = Instant::now();
-                hide_deadline = Some(Instant::now() + Duration::from_millis(config.auto_hide_ms));
                 let _ = app.emit("dock:state", "expanded");
             }
             // 收起态不在热区：幂等恢复穿透（§3.2 收起瞬间不立即恢复）
@@ -137,7 +175,6 @@ fn poll_loop(app: AppHandle) {
             // Falling edge: cursor left the window → collapse (Peeking transition)
             (DockState::Expanded, false, true) => {
                 state = DockState::Peeking;
-                hide_deadline = None;
                 last_change = Instant::now();
                 let _ = app.emit("dock:state", "hidden");
             }
@@ -151,15 +188,6 @@ fn poll_loop(app: AppHandle) {
             last_change = Instant::now();
         }
 
-        // §3 延迟自动收起：dock_auto_hide_delay 到期（光标可能仍在窗口内）
-        // §3 delayed auto-collapse: dock_auto_hide_delay elapsed (cursor may still be inside)
-        if state == DockState::Expanded && hide_deadline.is_some_and(|d| Instant::now() >= d) {
-            state = DockState::Peeking;
-            hide_deadline = None;
-            last_change = Instant::now();
-            let _ = app.emit("dock:state", "hidden");
-        }
-
         // 每轮无条件刷新，防外部改状态后卡死（docs/DOCK.md §4）
         // Refresh unconditionally every tick (docs/DOCK.md §4)
         was_in_hotzone = in_hotzone;
@@ -171,14 +199,10 @@ fn poll_loop(app: AppHandle) {
 // 命令必须 pub：generate_handler! 需要模块内可见的 __cmd__ 宏
 // Commands must be pub: generate_handler! needs the __cmd__ macros visible
 #[tauri::command]
-pub fn dock_set_config(
-    config: tauri::State<'_, Mutex<DockConfig>>,
-    enabled: bool,
-    auto_hide_ms: u64,
-) {
+pub fn dock_set_config(config: tauri::State<'_, Mutex<DockConfig>>, enabled: bool, position: String) {
     let mut c = config.lock().unwrap();
     c.enabled = enabled;
-    c.auto_hide_ms = auto_hide_ms;
+    c.position = position;
 }
 
 // 插件唤醒分发：Phase 3 仅聚焦主面板；Phase 4 按 window_mode 分发（docs/PLUGINS.md）
@@ -197,10 +221,23 @@ pub async fn launch_plugin(app: AppHandle, _plugin_id: String) -> Result<(), Str
 // Platform cursor and monitor (platform table in docs/DOCK.md §4)
 // ============================================================
 
-// Windows：GetCursorPos + MonitorFromPoint / GetMonitorInfoW
-// Windows: GetCursorPos + MonitorFromPoint / GetMonitorInfoW
+// 按贴靠边定位：主显示器 workArea 对应边、垂直居中
+// Position by attach side: the matching edge of the primary monitor workArea, vertically centered
+fn position_dock(dock: &tauri::WebviewWindow, side: DockSide, scale: f64) {
+    if let Some((wx, wy, ww, wh)) = primary_workarea(scale) {
+        let x = match side {
+            DockSide::Right => wx + ww - DOCK_W,
+            DockSide::Left => wx,
+        };
+        let y = wy + (wh - DOCK_H) / 2;
+        let _ = dock.set_position(PhysicalPosition::new(x, y));
+    }
+}
+
+// Windows：GetCursorPos 全局光标（物理像素）
+// Windows: GetCursorPos global cursor (physical pixels)
 #[cfg(windows)]
-fn cursor_position() -> Option<(i32, i32)> {
+fn cursor_position(_scale: f64) -> Option<(i32, i32)> {
     use windows_sys::Win32::Foundation::POINT;
     // windows-sys 0.48 中 GetCursorPos 位于 WindowsAndMessaging
     // GetCursorPos lives in WindowsAndMessaging in windows-sys 0.48
@@ -218,25 +255,19 @@ fn cursor_position() -> Option<(i32, i32)> {
     }
 }
 
-// Windows：光标所在显示器 workArea 右缘、垂直居中（创建时一次）
-// Windows: right edge of the cursor's monitor workArea, vertically centered (once at creation)
+// Windows：主显示器 workArea（含 (0,0) 的显示器，MONITOR_DEFAULTTOPRIMARY 兜底）
+// Windows: primary monitor workArea (the one containing (0,0); MONITOR_DEFAULTTOPRIMARY fallback)
 #[cfg(windows)]
-fn initial_position() -> Option<(i32, i32)> {
-    use windows_sys::Win32::Foundation::RECT;
+fn primary_workarea(_scale: f64) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
     };
 
-    let (cx, cy) = cursor_position()?;
     // SAFETY: MONITORINFO 按契约先填 cbSize；句柄来自系统 API
     // SAFETY: cbSize filled per contract; the handle comes from a system API
     unsafe {
-        // windows-sys 0.48 的 HANDLE 为 isize：0 即空句柄
-        // HANDLE is isize in windows-sys 0.48: 0 means null
-        let monitor = MonitorFromPoint(
-            windows_sys::Win32::Foundation::POINT { x: cx, y: cy },
-            MONITOR_DEFAULTTONEAREST,
-        );
+        let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
         if monitor == 0 {
             return None;
         }
@@ -251,22 +282,90 @@ fn initial_position() -> Option<(i32, i32)> {
             return None;
         }
         let work = info.rcWork;
-        let x = work.right - DOCK_W;
-        let y = work.top + (work.bottom - work.top - DOCK_H) / 2;
-        Some((x, y))
+        Some((work.left, work.top, work.right - work.left, work.bottom - work.top))
     }
 }
 
-// TODO: macOS（CGEventTap + NSScreen）与 Linux X11（XQueryPointer + RandR）光标支持
-// TODO: macOS (CGEventTap + NSScreen) and Linux X11 (XQueryPointer + RandR) cursor support
+// macOS 最小 CoreGraphics C ABI 绑定：光标 + 主显示器 bounds（零第三方依赖）
+// Minimal macOS CoreGraphics C ABI bindings: cursor + main display bounds (zero deps)
+#[cfg(target_os = "macos")]
+mod macos_api {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct CGPoint {
+        pub x: f64,
+        pub y: f64,
+    }
+
+    #[repr(C)]
+    pub struct CGSize {
+        pub width: f64,
+        pub height: f64,
+    }
+
+    #[repr(C)]
+    pub struct CGRect {
+        pub origin: CGPoint,
+        pub size: CGSize,
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        // 传 nil source 创建只读事件快照，用于读取当前光标位置
+        // nil source creates a read-only event snapshot to read the cursor position
+        pub fn CGEventCreate(source: *const c_void) -> *mut c_void;
+        pub fn CGEventGetLocation(event: *const c_void) -> CGPoint;
+        pub fn CGMainDisplayID() -> u32;
+        pub fn CGDisplayBounds(display: u32) -> CGRect;
+    }
+}
+
+// macOS：CGEventCreate(nil) + CGEventGetLocation（逻辑坐标 points，×scale 换算物理像素）
+// macOS: CGEventCreate(nil) + CGEventGetLocation (points; ×scale converts to physical pixels)
+#[cfg(target_os = "macos")]
+fn cursor_position(scale: f64) -> Option<(i32, i32)> {
+    // SAFETY: 只读系统调用；NULL 返回时放弃本轮检测
+    // SAFETY: read-only system calls; bail out on NULL
+    unsafe {
+        let event = macos_api::CGEventCreate(std::ptr::null());
+        if event.is_null() {
+            return None;
+        }
+        let p = macos_api::CGEventGetLocation(event);
+        Some(((p.x * scale).round() as i32, (p.y * scale).round() as i32))
+    }
+}
+
+// macOS：CGMainDisplayID + CGDisplayBounds（×scale 换算物理像素）
+// TODO: 换用 NSScreen.visibleFrame 以扣除菜单栏（当前用全屏 bounds，垂直中心偏差约半个菜单栏高度）
+// macOS: CGMainDisplayID + CGDisplayBounds (×scale to physical pixels)
+// TODO: switch to NSScreen.visibleFrame to exclude the menu bar (full bounds used for now)
+#[cfg(target_os = "macos")]
+fn primary_workarea(scale: f64) -> Option<(i32, i32, i32, i32)> {
+    // SAFETY: 只读系统调用
+    // SAFETY: read-only system calls
+    unsafe {
+        let bounds = macos_api::CGDisplayBounds(macos_api::CGMainDisplayID());
+        let x = (bounds.origin.x * scale).round() as i32;
+        let y = (bounds.origin.y * scale).round() as i32;
+        let w = (bounds.size.width * scale).round() as i32;
+        let h = (bounds.size.height * scale).round() as i32;
+        Some((x, y, w, h))
+    }
+}
+
+// TODO: Linux X11（XQueryPointer + RandR）光标支持
+// TODO: Linux X11 (XQueryPointer + RandR) cursor support
 // Wayland 无全局光标 API：降级为仅快捷键唤醒（docs/ROADMAP.md 风险表）
 // Wayland has no global cursor API: fall back to shortcut-only wake (docs/ROADMAP.md risks)
-#[cfg(not(windows))]
-fn cursor_position() -> Option<(i32, i32)> {
+#[cfg(not(any(windows, target_os = "macos")))]
+fn cursor_position(_scale: f64) -> Option<(i32, i32)> {
     None
 }
 
-#[cfg(not(windows))]
-fn initial_position() -> Option<(i32, i32)> {
+#[cfg(not(any(windows, target_os = "macos")))]
+fn primary_workarea(_scale: f64) -> Option<(i32, i32, i32, i32)> {
     None
 }

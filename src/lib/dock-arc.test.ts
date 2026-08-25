@@ -83,6 +83,18 @@ describe('槽位映射 / calculateDockPositions', () => {
     expect(positions.map((p) => p.actualIndex)).toEqual([0, 1, 2, 0, 1, 2, 0, 1, 2])
   })
 
+  it('左侧贴靠时按容器中轴镜像 / Left attach mirrors across the container axis', () => {
+    const right = calculateDockPositions(9, 0, 9)
+    const left = calculateDockPositions(9, 0, 9, Math.floor(9 / 2), 'left')
+    right.forEach((r, i) => {
+      expect(left[i].x).toBeCloseTo(DOCK_WIDTH - r.x, 6)
+      expect(left[i].y).toBeCloseTo(r.y, 6)
+    })
+    // 选中位仍是视觉弧顶（镜像后 x = 320−60 = 260）
+    // The active slot stays at the visual apex (mirrored x = 320−60 = 260)
+    expect(left[4].x).toBeCloseTo(DOCK_WIDTH - 60, 0)
+  })
+
   it('应在 16ms 内完成计算（60fps）/ Should complete within 16ms (60fps)', () => {
     const start = performance.now()
     calculateDockPositions(9, 0)

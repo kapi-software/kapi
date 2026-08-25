@@ -50,6 +50,10 @@ export function getPositionOnArc(index: number, total: number): { x: number; y: 
   }
 }
 
+// Dock 贴靠边：right = 弧线凸向左（贴右缘），left = 镜像凸向右（贴左缘）
+// Dock attach side: right = arc bulges left; left = mirrored arc bulges right
+export type DockSide = 'right' | 'left'
+
 // 滚轮循环：任意偏移归一到 [0, total)
 // Scroll cycling: normalize any offset into [0, total)
 // cycleOffset(100, 9) => 1; cycleOffset(-1, 9) => 8
@@ -57,15 +61,16 @@ export function cycleOffset(offset: number, total: number): number {
   return ((offset % total) + total) % total
 }
 
-// 计算全部可见槽位：槽位几何 + 滚轮偏移映射
-// Compute all visible slots: slot geometry + scroll-offset mapping
+// 计算全部可见槽位：槽位几何 + 滚轮偏移映射 + 贴靠边镜像
+// Compute all visible slots: geometry + scroll mapping + attach-side mirroring
 // calculateDockPositions(9, 0) => 9 个槽位，slotIndex 4 为选中位
 // calculateDockPositions(9, 0) => 9 slots with slotIndex 4 selected
 export function calculateDockPositions(
   count: number,
   offset: number,
   total: number = count,
-  centerIndex: number = Math.floor(count / 2)
+  centerIndex: number = Math.floor(count / 2),
+  side: DockSide = 'right'
 ): DockPosition[] {
   const positions: DockPosition[] = []
   for (let i = 0; i < count; i++) {
@@ -73,7 +78,9 @@ export function calculateDockPositions(
     // 防溢出：实际索引 = ((偏移 + i) % 总数 + 总数) % 总数
     // Prevent overflow: actualIndex = ((offset + i) % total + total) % total
     positions.push({
-      x,
+      // 左贴靠时按容器中轴镜像 x（基础几何恒为右贴靠）
+      // Mirror x across the container axis when attached left (base geometry is always right)
+      x: side === 'left' ? DOCK_WIDTH - x : x,
       y,
       slotIndex: i,
       actualIndex: cycleOffset(offset + i, total),

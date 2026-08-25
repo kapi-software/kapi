@@ -12,7 +12,7 @@ Kapi 技术文档：Dock 窗口参数、弧线几何、状态机与热区轮询�
 | 参数 | 值 | 说明 |
 | ---- | -- | ---- |
 | 尺寸 | 320 × 560 | 固定，`resizable: false`、`movable: false` |
-| 位置 | 光标所在显示器 workArea 右缘、垂直居中 | **创建时一次计算**（Rust 启动时定位），之后不动 |
+| 位置 | **主显示器** workArea 贴靠边（`dock_position`：right / left）、垂直居中 | Rust 启动时定位；设置页切换贴靠边时**实时重定位**（始终在主显示器） |
 | 透明 | `transparent: true` | — |
 | 无边框 | `decorations: false` | — |
 | 阴影 | `shadow: false` | — |
@@ -69,11 +69,16 @@ Kapi 技术文档：Dock 窗口参数、弧线几何、状态机与热区轮询�
           不维护本地状态副本（与 Electron window.kapi.onStateChange 同构）
 
 转换:
-  hidden → expanded    光标进入右缘 12px 热区（轮询上升沿，见 §4）
+  hidden → expanded    光标进入贴靠边 12px 热区（轮询上升沿，见 §4）
   expanded → hidden    光标离开窗口（轮询下降沿）或 点击窗口外部（渲染层通知）
-  expanded → hidden    延迟自动收起 scheduleCollapse（默认 3000ms = dock_auto_hide_delay）
   Alt+Space 切换       Tauri 版新增（global-shortcut）；Electron 版无此入口
 ```
+
+> **自动收起已移除**（2026-08-25 需求变更）：不再有延迟自动收起，
+> 光标在 Dock 内即保持展开，仅光标离开整窗时收起。`dock_auto_hide_delay`
+> 设置项随之废弃（settings 表种子保留以兼容，UI 已移除）。
+> Auto-hide removed (changed 2026-08-25): the dock stays expanded while the cursor
+> is inside; it only collapses when the cursor leaves the window.
 
 **鼠标穿透策略（移植重点，Electron 踩坑结论）**：
 
@@ -119,8 +124,8 @@ Electron `screen.getCursorScreenPoint()` 的 Rust 等价物：
 
 | 平台 | 光标位置 | 显示器归属 |
 | ---- | -------- | ---------- |
-| Windows | `GetCursorPos` (Win32) | `MonitorFromPoint` → `GetMonitorInfo` 取 workArea |
-| macOS | CGEventTap | NSScreen |
+| Windows | `GetCursorPos` (Win32) | `MonitorFromPoint((0,0), DEFAULTTOPRIMARY)` → `GetMonitorInfoW` 取主显示器 workArea |
+| macOS | `CGEventCreate(nil)` + `CGEventGetLocation`（逻辑坐标 ×scale 换算物理像素） | `CGMainDisplayID` + `CGDisplayBounds`（TODO: NSScreen.visibleFrame 扣菜单栏） |
 | Linux X11 | `XQueryPointer` | RandR |
 | Linux Wayland | 不可用 | 降级为仅 Alt+Space 快捷键唤醒（见 ROADMAP.md） |
 

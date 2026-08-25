@@ -13,6 +13,9 @@
     frontendDist: "../dist",
   },
   app: {
+    // macOS 透明窗口需要私有 API（Windows 不受影响）
+    // macOS transparent windows need the private API (Windows unaffected)
+    macOSPrivateApi: true,
     windows: [
       // 主面板：对齐 Electron panel（1200×1000，无边框自绘标题栏，关闭=隐藏复用）
       // Main panel: matches the Electron panel (1200×1000, frameless, close hides)
