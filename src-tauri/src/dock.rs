@@ -105,8 +105,15 @@ fn poll_loop(app: AppHandle) {
     loop {
         std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
 
-        let Some(dock) = app.get_webview_window("dock") else { continue };
-        let config = app.state::<Mutex<DockConfig>>().inner().lock().unwrap().clone();
+        let Some(dock) = app.get_webview_window("dock") else {
+            continue;
+        };
+        let config = app
+            .state::<Mutex<DockConfig>>()
+            .inner()
+            .lock()
+            .unwrap()
+            .clone();
         let side = DockSide::parse(&config.position);
         let scale = dock.scale_factor().unwrap_or(1.0);
         // 热区宽度：设置值（逻辑像素）× 缩放 → 物理像素，防御性夹取范围
@@ -154,8 +161,12 @@ fn poll_loop(app: AppHandle) {
 
         // macOS 光标为逻辑坐标，需按窗口缩放换算成物理像素与 outer_position 对齐
         // macOS cursor is in points; convert to physical pixels to match outer_position
-        let Some((cx, cy)) = cursor_position(scale) else { continue };
-        let Ok(pos) = dock.outer_position() else { continue };
+        let Some((cx, cy)) = cursor_position(scale) else {
+            continue;
+        };
+        let Ok(pos) = dock.outer_position() else {
+            continue;
+        };
 
         let in_window_y = cy >= pos.y && cy <= pos.y + DOCK_H;
         // 收起态热区 = 贴靠边条带（dock_hotzone_width，右贴右条带、左贴左条带）；展开态 = 整窗
@@ -173,7 +184,8 @@ fn poll_loop(app: AppHandle) {
             // 上升沿：进入展开延迟倒计时（延迟 0 时由下方到期逻辑同轮立即展开）
             // Rising edge: start the expand-delay countdown (zero delay expands this tick below)
             (DockState::Hidden, true, false) => {
-                pending_expand = Some(Instant::now() + Duration::from_millis(config.expand_delay_ms));
+                pending_expand =
+                    Some(Instant::now() + Duration::from_millis(config.expand_delay_ms));
             }
             // 收起态不在热区：幂等恢复穿透（§3.2 收起瞬间不立即恢复）
             // Collapsed and outside the hotzone: idempotently restore pass-through (§3.2)
@@ -243,17 +255,8 @@ pub fn dock_set_config(
     c.hotzone_width = hotzone_width;
     c.expand_delay_ms = expand_delay_ms;
 }
-
-// 插件唤醒分发：Phase 3 仅聚焦主面板；Phase 4 按 window_mode 分发（docs/PLUGINS.md）
-// Plugin wake dispatch: Phase 3 only focuses the panel; Phase 4 dispatches by window_mode
-#[tauri::command]
-pub async fn launch_plugin(app: AppHandle, _plugin_id: String) -> Result<(), String> {
-    if let Some(main) = app.get_webview_window("main") {
-        main.show().map_err(|e| e.to_string())?;
-        main.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
+// launch_plugin 已迁至 plugin_manager.rs（Phase 4 按 window_mode 完整分发）
+// launch_plugin moved to plugin_manager.rs (full window_mode dispatch in Phase 4)
 
 // ============================================================
 // 平台光标与显示器（docs/DOCK.md §4 平台表）
@@ -310,7 +313,12 @@ fn primary_workarea(_scale: f64) -> Option<(i32, i32, i32, i32)> {
         if monitor == 0 {
             return None;
         }
-        let zero_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let zero_rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             rcMonitor: zero_rect,
@@ -321,7 +329,12 @@ fn primary_workarea(_scale: f64) -> Option<(i32, i32, i32, i32)> {
             return None;
         }
         let work = info.rcWork;
-        Some((work.left, work.top, work.right - work.left, work.bottom - work.top))
+        Some((
+            work.left,
+            work.top,
+            work.right - work.left,
+            work.bottom - work.top,
+        ))
     }
 }
 

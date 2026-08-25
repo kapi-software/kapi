@@ -60,6 +60,7 @@
           permissions: [
             "core:default",
             "opener:default",
+            "dialog:allow-open",
             "sql:default",
             // sql:default 仅含 load/close/select：写操作（设置保存等）需显式放行
             // sql:default covers load/close/select only: writes (settings saves) need explicit grant

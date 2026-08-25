@@ -227,10 +227,12 @@ pub fn migrations() -> Vec<Migration> {
 //     )
 ```
 
-### 3.3 Tauri 命令（v2 API）
+### 3.3 Tauri 命令（v2 API）——已实现
+
+`launch_plugin` / `plugin_install` / `plugin_uninstall` 落地于 `src-tauri/src/plugin_manager.rs`（经 `DbInstances` 共享前端创建的 SQLite 连接池）；安装流程：manifest 校验 → 复制到 `plugins/{id}` → 写表（失败回滚目录）。
 
 ```rust
-// src-tauri/src/lib.rs（示意）
+// src-tauri/src/plugin_manager.rs（节选）
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 // 统一插件启动入口（Dock / 主面板 / 快捷键共用）

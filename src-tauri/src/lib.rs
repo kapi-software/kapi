@@ -2,6 +2,7 @@
 // Kapi app entry: plugin registration, DB migrations, protocol, commands, dock service, system tray
 mod db;
 mod dock;
+mod plugin_manager;
 mod plugin_protocol;
 mod tray;
 
@@ -11,6 +12,9 @@ use std::sync::Mutex;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // 目录选择对话框：插件本地导入（plugins 页）
+        // Directory picker dialog: local plugin import (plugins page)
+        .plugin(tauri_plugin_dialog::init())
         // SQLite 插件：迁移随插件加载自动执行（唯一入口，见 db.rs）
         // SQLite plugin: migrations run automatically on load (single entry, see db.rs)
         .plugin(
@@ -29,7 +33,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dock::dock_set_config,
-            dock::launch_plugin,
+            plugin_manager::plugin_install,
+            plugin_manager::plugin_uninstall,
+            plugin_manager::launch_plugin,
             tray::tray_set_language
         ])
         // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单

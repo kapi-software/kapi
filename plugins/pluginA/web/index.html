@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>示例插件 A</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        color: #fff;
+      }
+      .card {
+        padding: 32px 40px;
+        border-radius: 16px;
+        background: rgba(0, 0, 0, 0.25);
+        backdrop-filter: blur(8px);
+        text-align: center;
+      }
+      h1 { margin: 0 0 4px; font-size: 22px; }
+      p { margin: 0 0 20px; font-size: 13px; opacity: 0.85; }
+      button {
+        font-size: 15px;
+        padding: 10px 24px;
+        border: none;
+        border-radius: 999px;
+        background: #fff;
+        color: #6366f1;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .count { margin-top: 16px; font-size: 28px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>示例插件 A</h1>
+      <p>Sample Plugin A · 经 kapi-plugin:// 协议加载 / served via kapi-plugin://</p>
+      <button id="inc">点我 +1 / Click me</button>
+      <div class="count" id="count">0</div>
+    </div>
+    <script>
+      // 桥接 API（kapi:storage 等）接入后改为 SDK 调用；当前仅演示隔离运行
+      // Will switch to the SDK once the bridge API lands; for now this proves isolated rendering
+      let n = 0;
+      document.getElementById("inc").addEventListener("click", () => {
+        n += 1;
+        document.getElementById("count").textContent = String(n);
+      });
+    </script>
+  </body>
+</html>

@@ -25,6 +25,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 实现主面板框架（分组导航 + 设置页全量设置项 + 强调色主题 + 日志过滤/自动刷新，2026-08-25）
 - [x] 移植 Dock 侧边栏（弧形 UI + Windows 热区轮询 + 唤醒链路，2026-08-25；macOS/Linux 轮询待移植）
 - [x] kapi-plugin:// 自定义协议（静态资源服务 + 路径安全，22 项单元测试，2026-08-25）
+- [x] 插件管理器（本地导入 / 卸载 / 启停 / 模式切换 / 排序 + launch_plugin 完整分发 + 最小 PluginHost 链路，2026-08-25）
 
 ## 3. 待开发清单
 
@@ -37,9 +38,9 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 日志页（级别过滤 + 自动刷新，2026-08-25）
 - [x] Dock 窗口（边沿触发热区轮询 + motion 弧形前端 + 仅唤醒，2026-08-25；Windows 轮询已实现，macOS/Linux 见 DOCK.md §4 平台表）
 - [x] kapi-plugin:// 自定义协议（静态资源服务 + 路径安全，2026-08-25）
-- [ ] PluginHost（iframe + postMessage 桥接，内嵌/独立共用）
-- [ ] 插件独立窗口（manifest 自定义窗口参数，重复点击聚焦）
-- [ ] 插件管理器（安装/卸载/启停/模式切换/排序）
+- [ ] PluginHost（iframe 宿主已就绪：/plugin/:id 内嵌 + /plugin-window/:id 独立壳共用；postMessage 桥接待接）
+- [x] 插件独立窗口（manifest 自定义窗口参数，重复点击聚焦，2026-08-25）
+- [x] 插件管理器（本地导入安装/卸载/启停/模式切换/排序，2026-08-25；市场安装属 Phase 5）
 - [ ] wasmtime 运行时（kapi_invoke ABI + 宿主函数 + fuel 限制）
 - [ ] 桥接 API 与权限模型（PermissionGuard，默认拒绝）
 - [ ] @kapi/plugin-sdk（插件前端 SDK）与 kapi-plugin-sdk（WASM Rust SDK）

@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@/lib/tauri";
 import { initDb, pluginDb } from "@/lib/db";
+import { pluginAssetUrl } from "@/lib/plugin-url";
 import {
   calculateDockPositions,
   DOCK_WIDTH,
@@ -19,12 +20,12 @@ import {
 import { useSettingsStore } from "@/stores/settings";
 import type { Plugin } from "@/types";
 
-// Dock 渲染条目（来自 plugins 表；icon 为空时回退首字母/演示图标）
+// Dock 渲染条目（来自 plugins 表；iconUrl 为空时回退首字母/演示图标）
 // Dock render item (from the plugins table; falls back to initial/demo icon)
 interface DockItem {
   id: string;
   name: string;
-  icon: string | null;
+  iconUrl: string | null;
 }
 
 // 演示条目：插件系统（Phase 4）落地前的占位，便于浏览器与空库预览
@@ -94,8 +95,10 @@ function DockDot({
           : undefined
       }
     >
-      {item.icon ? (
-        <span className="text-2xl leading-none">{item.icon}</span>
+      {item.iconUrl ? (
+        // 图标经 kapi-plugin:// 协议加载（icon 为插件目录内相对路径）
+        // Icons load through the kapi-plugin:// protocol (icon is a relative path)
+        <img src={item.iconUrl} alt={item.name} className="size-12 rounded-full object-cover" draggable={false} />
       ) : (
         <span className="text-lg font-semibold text-white/90 select-none">
           {item.name.slice(0, 1).toUpperCase()}
@@ -133,19 +136,26 @@ export default function DockApp() {
     document.body.style.background = "transparent";
   }, []);
 
-  // 加载已安装插件；空库或失败时保留演示条目
-  // Load installed plugins; keep demo items on empty DB or failure
+  // 加载已安装且启用的插件（禁用项不进 Dock，docs/PLUGINS.md §6）
+  // Load installed & enabled plugins (disabled ones stay off the Dock)
+  // plugins:changed 广播后重载，安装 / 卸载 / 启停实时反映
+  // Reload on plugins:changed broadcasts so install/uninstall/toggle apply live
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
-    initDb()
-      .then(() => pluginDb.getAll())
-      .then((rows) => {
-        if (!cancelled) setPlugins(rows);
-      })
-      .catch((e) => console.error("Dock 插件列表加载失败 / Dock plugin load failed:", e));
+    const load = () => {
+      initDb()
+        .then(() => pluginDb.getAll())
+        .then((rows) => {
+          if (!cancelled) setPlugins(rows.filter((p) => p.is_enabled));
+        })
+        .catch((e) => console.error("Dock 插件列表加载失败 / Dock plugin load failed:", e));
+    };
+    load();
+    const un = listen("plugins:changed", load);
     return () => {
       cancelled = true;
+      un.then((f) => f());
     };
   }, []);
 
@@ -181,8 +191,12 @@ export default function DockApp() {
   // 渲染条目与槽位：真实插件优先，其次演示条目（名称走 i18n）
   // Render items and slots: real plugins first, then demo items (names via i18n)
   const items: DockItem[] = plugins.length
-    ? plugins.map((p) => ({ id: p.id, name: p.name, icon: p.icon }))
-    : DEMO_ITEMS.map(({ id, nameKey, icon }) => ({ id, name: t(nameKey), icon }));
+    ? plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        iconUrl: p.icon ? pluginAssetUrl(p.id, p.icon) : null,
+      }))
+    : DEMO_ITEMS.map(({ id, nameKey, icon }) => ({ id, name: t(nameKey), iconUrl: icon }));
   const visibleCount = Math.max(1, Math.min(dock_visible_items, items.length));
   const positions = useMemo(
     () =>

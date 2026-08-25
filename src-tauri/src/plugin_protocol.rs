@@ -91,6 +91,19 @@ fn serve_from(plugins_root: &Path, method: &str, uri_path: &str) -> Response<Cow
     }
 }
 
+// plugin_id 合法性：字符集 [A-Za-z0-9._-]，整体不能是 "." 或 ".."
+// plugin_id validity: charset [A-Za-z0-9._-]; "." or ".." as a whole are rejected
+// 协议与插件安装校验（plugin_manager.rs）共用同一份规则
+// Shared by the protocol and install validation (plugin_manager.rs)
+pub fn is_valid_plugin_id(id: &str) -> bool {
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 // 请求路径 → (plugin_id, web 内相对路径段)：百分号解码 + 词法安全校验
 // Request path -> (plugin_id, relative segments under web/): percent-decode + lexical safety checks
 fn parse_request_path(uri_path: &str) -> Result<(String, Vec<String>), ProtocolError> {
@@ -108,15 +121,7 @@ fn parse_request_path(uri_path: &str) -> Result<(String, Vec<String>), ProtocolE
         return Err(ProtocolError::NotFound);
     }
     let plugin_id = segments.remove(0);
-
-    // plugin_id 字符集 [A-Za-z0-9._-]；整体为 "." 或 ".." 一律拒绝
-    // plugin_id charset [A-Za-z0-9._-]; "." or ".." as a whole are always rejected
-    let id_valid = plugin_id != "."
-        && plugin_id != ".."
-        && plugin_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if !id_valid {
+    if !is_valid_plugin_id(plugin_id) {
         return Err(ProtocolError::Forbidden);
     }
 

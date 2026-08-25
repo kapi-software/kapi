@@ -23,10 +23,14 @@ tauri-build = { version = "2", features = ["config-json5"] }
 # macos-private-api: required for the transparent dock window on macOS (no-op on Windows)
 # tray-icon: system tray (resident app per docs/PANEL.md)
 tauri = { version = "2", features = ["config-json5", "macos-private-api", "tray-icon"] }
+tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 与 tauri-plugin-sql 共用同一连接池（DbInstances），版本需与其 0.8 对齐
+# Shares the pool with tauri-plugin-sql (DbInstances); must stay on its 0.8 line
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 
 # Dock 光标轮询（docs/DOCK.md §4）：仅 Windows 需要 Win32 API
 # Dock cursor polling (docs/DOCK.md §4): Win32 API needed on Windows only

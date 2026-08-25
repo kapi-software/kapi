@@ -106,6 +106,15 @@ export const pluginDb = {
     )
   },
 
+  // 启用 / 禁用（禁用后 Dock 与侧边栏隐藏，docs/PLUGINS.md §6）
+  // Enable / disable (disabled plugins hide from the Dock and sidebar)
+  async updateEnabled(id: string, enabled: boolean): Promise<void> {
+    await getDb().execute(
+      'UPDATE plugins SET is_enabled = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [enabled ? 1 : 0, id]
+    )
+  },
+
   // 批量更新排序（单事务）
   // Batch update sort order in one transaction
   async updateSortOrder(orderedIds: string[]): Promise<void> {

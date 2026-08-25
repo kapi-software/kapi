@@ -1,0 +1,19 @@
+{
+  "id": "com.kapi.sample.plugin-b",
+  "name": "示例插件 B",
+  "version": "1.0.0",
+  "kapi_version": "^1.0.0",
+  "author": "Kapi",
+  "description": "独立窗口示例：manifest.window 自定义尺寸 / 标题 / 最小尺寸",
+  "category": "tool",
+  "window": {
+    "mode": "independent",
+    "title": "示例插件 B · 独立窗口",
+    "width": 480,
+    "height": 360,
+    "minWidth": 360,
+    "minHeight": 280,
+    "resizable": true,
+    "alwaysOnTop": false
+  }
+}

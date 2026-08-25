@@ -40,7 +40,8 @@ Kapi 技术文档：主面板布局、路由、PluginHost 与设置系统。
 | 路由 | 页面 | 组件 | 说明 |
 | ---- | ---- | ---- | ---- |
 | `/` | 首页 | `Dashboard` | 概览：最近使用插件、工作流运行状态、快捷入口 |
-| `/plugins` | 插件管理 | `PluginsPage` | 已安装列表、启用/禁用、切换 window_mode、拖拽排序（写 sort_order） |
+| `/plugins` | 插件管理 | `Plugins` | 已安装列表、本地导入、启用/禁用、切换 window_mode、上移/下移排序（写 sort_order）、卸载（两步确认） |
+| `/plugin/:id` | 插件内嵌视图 | `PluginEmbedView` | 面板外壳内的 PluginHost（iframe，kapi-plugin:// 协议加载） |
 | `/store` | 插件市场 | `StorePage` | GitHub 来源浏览、安装/更新/卸载 |
 | `/plugin/:id` | 插件内嵌视图 | `PluginEmbedView` | 主面板内嵌运行插件（§3） |
 | `/plugin-window/:id` | 插件独立壳 | `PluginWindowShell` | 独立窗口加载的**裸壳路由**（无侧边栏），内嵌同一 `PluginHost` |

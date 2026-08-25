@@ -1,0 +1,12 @@
+{
+  "id": "com.kapi.sample.plugin-a",
+  "name": "示例插件 A",
+  "version": "1.0.0",
+  "kapi_version": "^1.0.0",
+  "author": "Kapi",
+  "description": "最小可安装示例：验证 kapi-plugin:// 协议与内嵌运行链路",
+  "category": "tool",
+  "window": {
+    "mode": "embedded"
+  }
+}

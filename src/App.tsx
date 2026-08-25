@@ -22,6 +22,9 @@ import Store from "@/pages/Store";
 import Workflow from "@/pages/Workflow";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
+import PluginEmbedView from "@/pages/PluginEmbedView";
+import PluginWindowShell from "@/pages/PluginWindowShell";
+import { Toaster } from "@/components/ui/sonner";
 
 // 主面板布局（shadcn sidebar-16）：全宽顶栏置顶 + 经典侧边栏 + 滚动内容区
 // Panel layout (shadcn sidebar-16): full-width header on top, classic sidebar, scrolling content
@@ -34,6 +37,18 @@ function PanelLayout() {
     if (!isTauri()) return;
     const un = listen<string>("app:navigate", (e) => {
       navigate(e.payload);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [navigate]);
+
+  // launch_plugin（embedded 模式）→ Rust 发来 plugin:navigate，路由到内嵌视图
+  // launch_plugin (embedded mode) → Rust emits plugin:navigate; route to the embed view
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen<string>("plugin:navigate", (e) => {
+      navigate(`/plugin/${e.payload}`);
     });
     return () => {
       un.then((f) => f());
@@ -64,6 +79,7 @@ function PanelLayout() {
           <Outlet />
         </main>
       </div>
+      <Toaster />
     </SidebarProvider>
   );
 }
@@ -71,7 +87,7 @@ function PanelLayout() {
 // 应用根组件：按窗口 label 分流
 // Root component: routes by window label
 export default function App() {
-  const [entry, setEntry] = useState<"main" | "dock" | null>(null);
+  const [entry, setEntry] = useState<"main" | "dock" | "plugin" | null>(null);
   const theme = useSettingsStore((s) => s.settings.theme);
   const language = useSettingsStore((s) => s.settings.language);
   const dockEnabled = useSettingsStore((s) => s.settings.dock_enabled);
@@ -180,7 +196,11 @@ export default function App() {
     // getCurrentWindow() is synchronous in Tauri v2
     try {
       const label = getCurrentWindow().label;
-      setEntry(label === "dock" ? "dock" : "main");
+      // 插件独立窗口：label 形如 plugin-<id>（Rust 按 manifest.window 创建）
+      // Plugin independent windows use labels like plugin-<id> (created by Rust)
+      setEntry(
+        label === "dock" ? "dock" : label.startsWith("plugin-") ? "plugin" : "main"
+      );
     } catch {
       setEntry("main");
     }
@@ -194,12 +214,26 @@ export default function App() {
     return <DockApp />;
   }
 
+  // 插件独立窗口：裸 PluginHost 壳（/plugin-window/:id）
+  // Plugin independent window: a bare PluginHost shell (/plugin-window/:id)
+  if (entry === "plugin") {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/plugin-window/:id" element={<PluginWindowShell />} />
+          <Route path="*" element={<PluginWindowShell />} />
+        </Routes>
+      </BrowserRouter>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<PanelLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/plugins" element={<Plugins />} />
+          <Route path="/plugin/:id" element={<PluginEmbedView />} />
           <Route path="/store" element={<Store />} />
           <Route path="/workflow" element={<Workflow />} />
           <Route path="/logs" element={<Logs />} />
