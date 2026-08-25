@@ -165,7 +165,8 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
 src-tauri/migrations/
 ├── 001_init.sql        # 建表 + 索引（本文档 §3）
 ├── 002_defaults.sql    # 默认设置种子（本文档 §4）
-└── 003_xxx.sql         # 后续按版本递增，禁止修改已发布的迁移文件
+├── 003_wal.sql         # 启用 WAL 日志模式（Rust 桥接与前端并发读写，修复 database is locked）
+└── 004_xxx.sql         # 后续按版本递增，禁止修改已发布的迁移文件
 ```
 
 ## 6. 数据库访问层（前端）

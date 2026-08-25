@@ -21,5 +21,30 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/002_defaults.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "enable WAL journal mode",
+            sql: include_str!("../migrations/003_wal.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 全部迁移脚本可执行（含 003 的带返回行 PRAGMA）：内存库逐条跑通即可
+    // Every migration script executes (incl. the row-returning PRAGMA in 003)
+    #[tokio::test]
+    async fn all_migrations_execute_cleanly() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        for m in migrations() {
+            sqlx::raw_sql(&m.sql).execute(&pool).await.unwrap();
+        }
+        // 种子设置存在 / seeded settings exist
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM settings").fetch_one(&pool).await.unwrap();
+        assert!(count > 0);
+    }
 }
