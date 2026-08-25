@@ -32,7 +32,9 @@ function PanelLayout() {
       className="flex h-svh flex-col"
       style={
         {
-          "--header-height": "calc(var(--spacing) * 14)",
+          // 顶栏高度 48px（官方 demo 为 32px，偏挤；上一版 56px 偏高）
+          // Header height 48px (official demo 32px feels cramped; 56px felt tall)
+          "--header-height": "calc(var(--spacing) * 12)",
           "--sidebar-width": "12rem",
           "--sidebar-width-icon": "3rem",
         } as CSSProperties
