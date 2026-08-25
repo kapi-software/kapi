@@ -123,4 +123,13 @@ export default {
     title: '工作流',
     desc: '插件间数据联动编排（如：剪贴板监听 → 代码美化保存 → 截图生成）。待 Phase 6 实现（DAG 引擎 + React Flow 编辑器）。',
   },
+  dock: {
+    expand: '展开插件栏',
+    collapse: '收起插件栏',
+    demoClipboard: '剪贴板',
+    demoScreenshot: '截图',
+    demoSnippet: '代码片段',
+    demoImage: '图片',
+    demoPlugin: '插件',
+  },
 }

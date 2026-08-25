@@ -24,3 +24,12 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Dock 光标轮询（docs/DOCK.md §4）：仅 Windows 需要 Win32 API
+# Dock cursor polling (docs/DOCK.md §4): Win32 API needed on Windows only
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.48", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
+

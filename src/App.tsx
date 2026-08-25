@@ -12,6 +12,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/navigation/AppSidebar";
 import { TopBar } from "@/components/navigation/TopBar";
+import DockApp from "@/dock/Dock";
 import Dashboard from "@/pages/Dashboard";
 import Plugins from "@/pages/Plugins";
 import Store from "@/pages/Store";
@@ -90,11 +91,14 @@ export default function App() {
     }
   }, [accentColor]);
 
-  // 窗口分流：dock 窗口渲染 Dock UI（Phase 3 实现），其余渲染主面板
+  // 窗口分流：dock 窗口渲染 Dock UI（Phase 3），其余渲染主面板
   // Window routing: the dock window renders the Dock UI (Phase 3), others the panel
+  // 浏览器开发预览：?window=dock 直接预览 Dock 窗口 UI
+  // Browser dev preview: ?window=dock previews the dock window UI
   useEffect(() => {
     if (!isTauri()) {
-      setEntry("main");
+      const query = new URLSearchParams(window.location.search).get("window");
+      setEntry(query === "dock" ? "dock" : "main");
       return;
     }
     // getCurrentWindow() 在 Tauri v2 中为同步调用
@@ -109,10 +113,10 @@ export default function App() {
 
   if (entry === null) return null;
 
-  // Dock 窗口：透明占位，Phase 3 按 docs/DOCK.md 实现弧形 UI
-  // Dock window: transparent placeholder; arc UI lands in Phase 3 (docs/DOCK.md)
+  // Dock 窗口：弧形插件栏（docs/DOCK.md）
+  // Dock window: arc-shaped plugin bar (docs/DOCK.md)
   if (entry === "dock") {
-    return <div className="h-screen w-screen bg-transparent" />;
+    return <DockApp />;
   }
 
   return (

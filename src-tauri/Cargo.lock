@@ -4294,6 +4294,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

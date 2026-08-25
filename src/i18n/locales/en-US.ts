@@ -122,4 +122,13 @@ export default {
     title: 'Workflow',
     desc: 'Data-link orchestration between plugins (e.g. clipboard watch → beautify & save → screenshot). Lands in Phase 6 (DAG engine + React Flow editor).',
   },
+  dock: {
+    expand: 'Expand dock',
+    collapse: 'Collapse dock',
+    demoClipboard: 'Clipboard',
+    demoScreenshot: 'Screenshot',
+    demoSnippet: 'Snippet',
+    demoImage: 'Image',
+    demoPlugin: 'Plugin',
+  },
 }
