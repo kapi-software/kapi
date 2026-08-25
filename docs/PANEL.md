@@ -57,47 +57,47 @@ Kapi 技术文档：主面板布局、路由、PluginHost 与设置系统。
 - embedded → `PluginEmbedView`（带主面板侧边栏的 `/plugin/:id`）
 - independent → `PluginWindowShell`（独立 `WebviewWindow` 加载的 `/plugin-window/:id`，无侧边栏）
 
-`PluginHost` 职责：加载插件 UI（iframe 指向 `kapi-plugin://` 自定义协议，天然隔离）+ 桥接插件与 Rust 之间的 RPC。
+`PluginHost` 职责：加载插件 UI（iframe 指向 `kapi-plugin://` 自定义协议，天然隔离）+ 桥接插件与 Rust 之间的 RPC（**已实现**）。
 
 ```tsx
-// src/components/plugin/PluginHost.tsx（示意）
+// src/components/plugin/PluginHost.tsx（实际实现要点，协议处理在 src/lib/plugin-bridge.ts）
 import { useEffect, useRef } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { createPluginBridgeHandler } from '@/lib/plugin-bridge'
+import { invokeTyped, isTauri } from '@/lib/tauri'
 
 export function PluginHost({ pluginId }: { pluginId: string }) {
   const frameRef = useRef<HTMLIFrameElement>(null)
 
   // 监听 iframe 的 postMessage，转发到 Rust（权限检查在 Rust 侧统一执行）
   useEffect(() => {
-    const onMessage = async (e: MessageEvent) => {
-      if (e.source !== frameRef.current?.contentWindow) return   // 只信任自家 iframe
-      const req = e.data                                        // { id, channel, payload }
-      if (typeof req?.channel !== 'string' || !req.channel.startsWith('kapi:')) return
-
-      try {
-        const result = await invoke('plugin_bridge', {
-          pluginId, channel: req.channel, payload: req.payload,
-        })
-        e.source!.postMessage({ id: req.id, ok: true, data: result }, '*')
-      } catch (err) {
-        e.source!.postMessage({ id: req.id, ok: false, error: String(err) }, '*')
-      }
-    }
+    if (!isTauri()) return                                    // 浏览器预览无 IPC
+    const onMessage = createPluginBridgeHandler({
+      pluginId,
+      getTargetWindow: () => frameRef.current?.contentWindow ?? null,
+      invoke: (command, args) => invokeTyped(command, args),
+    })
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [pluginId])
 
-  // 插件 UI 通过自定义协议加载
+  // 插件 UI 通过自定义协议加载（Windows WebView2 为 http://kapi-plugin.localhost 形式）
   return (
     <iframe
       ref={frameRef}
       className="h-full w-full border-0"
-      src={`kapi-plugin://localhost/${pluginId}/index.html`}
-      sandbox="allow-scripts allow-forms"   // 不给 allow-same-origin，保持隔离
+      src={pluginAssetUrl(pluginId)}
+      sandbox="allow-scripts allow-forms allow-popups"   // 不给 allow-same-origin，保持隔离
     />
   )
 }
 ```
+
+协议细节（`src/lib/plugin-bridge.ts`，纯函数可单测）：
+
+- 请求 `{ id, channel, payload }`，`channel` 必须以 `kapi:` 开头；响应 `{ id, ok: true, data }` | `{ id, ok: false, error }`。
+- **只信任自家 iframe**（`e.source === contentWindow`）；来源不匹配或畸形请求**静默丢弃**（不回发，避免回声回路）。
+- sandbox 无 `allow-same-origin` → iframe 为 opaque origin（`e.origin === "null"`），回发 targetOrigin 用 `'*'`（目标已过 source 校验，内容仅为该插件自身请求的结果）。
+- 独立窗口壳（`PluginWindowShell`）在 `window_config.transparent` 时以加载门控 + 内联样式保证首帧即透明（html/body 双透明，见 PLUGINS.md §2.2）。
 
 设计要点：
 

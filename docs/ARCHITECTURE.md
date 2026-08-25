@@ -256,7 +256,7 @@ async fn launch_plugin(
         }
         // 独立窗口：存在则聚焦，不存在按 manifest.window 创建
         "independent" => {
-            let label = format!("plugin-{}", plugin_id);
+            let label = format!("plugin-{}", plugin_id.replace('.', "_"));  // label 禁 "."
             if let Some(win) = app.get_webview_window(&label) {
                 win.show().map_err(|e| e.to_string())?;
                 win.set_focus().map_err(|e| e.to_string())?;
@@ -269,16 +269,21 @@ async fn launch_plugin(
         _ => state.workflow_engine.execute_plugin_once(&plugin_id).await,
     }
 }
+```
 
-// 插件桥接统一入口：权限检查 + 分发（见 PLUGINS.md）
+`plugin_bridge` **已实现**（`src-tauri/src/plugin_bridge.rs`）：权限检查（`PermissionGuard`，manifest 按次加载、默认拒绝）+ 通道路由 + 各通道 handler；`window` 参数由 Tauri 注入（调用方窗口），`kapi:window.*` 借此限定只能操控插件自己的独立窗口。通道、payload 与错误码全表见 PLUGINS.md §4。
+
+```rust
+// src-tauri/src/plugin_bridge.rs（节选）
 #[tauri::command]
-async fn plugin_bridge(
-    state: State<'_, AppState>,
+pub async fn plugin_bridge(
+    app: AppHandle,
+    window: WebviewWindow,     // Tauri 注入 = 调用方窗口（main 或 plugin-* 壳）
     plugin_id: String,
-    channel: String,          // 'kapi:storage.get' / 'kapi:plugin.invoke' / ...
+    channel: String,           // 'kapi:storage.get' / 'kapi:http.fetch' / ...
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    state.bridge.dispatch(&plugin_id, &channel, payload).await
+    // 1. id 校验 → 2. 上下文闸（未安装/禁用即拒）→ 3. 权限闸 → 4. 按通道分发
 }
 ```
 

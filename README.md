@@ -17,7 +17,7 @@ A Tauri-based plugin-oriented desktop application with unified plugin management
 | **Main Panel** | Navigation sidebar (Home / Plugins / Store / Workflow / Logs / Settings) + content area. Built with React 19 + shadcn/ui. | ✅ Done |
 | **Dock Sidebar** | Arc-shaped launcher on the right screen edge with hotzone polling. **Wakes plugins only** (dispatch lives in Rust). | ✅ Done |
 | **System Tray** | Resident app: close-to-tray, panel / settings / quit menu. | ✅ Done |
-| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. `kapi-plugin://` protocol, install/uninstall/enable/mode switch, embedded & independent window hosts. | 🔨 In progress |
+| **Plugin System** | WASM-sandboxed logic (wasmtime) + Web UI. `kapi-plugin://` protocol, install/uninstall/enable/mode switch, embedded & independent window hosts, postMessage bridge with a default-deny permission model, Tauri-aligned window customization (transparent / frameless / ...). WASM runtime & plugin SDKs pending. | 🔨 In progress |
 | **Workflow System** | Trigger-based DAG step graphs for cross-plugin data flow (e.g., clipboard watch → beautify & save → screenshot). | Phase 6 |
 | **Local Database** | SQLite via `tauri-plugin-sql`. Single migration entry point on the Rust side. | ✅ Done |
 
@@ -81,7 +81,7 @@ pnpm tauri build
 │   │                           # PluginWindowShell / Store / Workflow / Logs / Settings
 │   ├── stores/                 # Zustand stores (settings, plugins)
 │   ├── i18n/                   # Locales (zh-CN.ts, en-US.ts)
-│   ├── lib/                    # db.ts, plugin-url.ts, settings.ts, dock-arc.ts, tauri.ts
+│   ├── lib/                    # db.ts, plugin-bridge.ts, plugin-url.ts, settings.ts, dock-arc.ts, tauri.ts
 │   └── types/                  # Global TypeScript types
 │
 ├── src-tauri/                  # Backend (Rust)
@@ -92,10 +92,11 @@ pnpm tauri build
 │   │   ├── dock.rs             # Hotzone polling + window positioning
 │   │   ├── tray.rs             # System tray
 │   │   ├── plugin_protocol.rs  # kapi-plugin:// protocol (path-safe static serving)
+│   │   ├── plugin_bridge.rs    # Bridge command + PermissionGuard (default-deny)
 │   │   └── plugin_manager.rs   # Install / uninstall / launch dispatch
 │   └── tauri.conf.json5        # Tauri configuration (JSON5, inline capabilities)
 │
-├── plugins/                    # Sample plugin fixtures (pluginA / pluginB)
+├── plugins/                    # Sample plugin fixtures (pluginA / pluginB / pluginC)
 └── docs/                       # Design documentation (Chinese)
 ```
 
