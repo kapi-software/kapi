@@ -10,15 +10,16 @@ async function flush() {
   await new Promise((r) => setTimeout(r, 0))
 }
 
-// 假 window：收集 message 监听与 parent.postMessage 调用（pagehide 等其它监听不参与）
-// Fake window: collects message listeners and parent.postMessage calls (pagehide and
-// other listeners stay out of the dispatch)
+// 假 window：收集 message / pagehide 监听与 parent.postMessage 调用
+// Fake window: collects message / pagehide listeners and parent.postMessage calls
 function loadSdk(parentOverride?: unknown) {
   const listeners: Array<(e: { data: unknown }) => void> = []
+  const pagehide: Array<() => void> = []
   const posted: Array<{ id: number; channel: string; payload: unknown }> = []
   const fakeWindow: Record<string, unknown> = {
     addEventListener: (type: string, fn: (e: { data: unknown }) => void) => {
       if (type === 'message') listeners.push(fn)
+      if (type === 'pagehide') pagehide.push(fn as unknown as () => void)
     },
   }
   fakeWindow.parent =
@@ -37,8 +38,10 @@ function loadSdk(parentOverride?: unknown) {
   const push = (type: string, data: unknown, source = 'com.source') => {
     listeners.forEach((fn) => fn({ data: { kapiEvent: true, type, data, source } }))
   }
+  // 页面卸载（内嵌返回列表 / 窬口关闭）/ page unload (embed back to list / window close)
+  const unload = () => pagehide.forEach((fn) => fn())
   const channels = () => posted.map((m) => m.channel)
-  return { kapi, posted, reply, push, channels }
+  return { kapi, posted, reply, push, unload, channels }
 }
 
 describe('@kapi/plugin-sdk / RPC 基础 / RPC basics', () => {
@@ -176,5 +179,50 @@ describe('@kapi/plugin-sdk / 事件订阅 / event subscription', () => {
     push('tick', 2)
     await flush()
     expect(hits2).toEqual([1])
+  })
+})
+
+describe('@kapi/plugin-sdk / 生命周期 / lifecycle', () => {
+  type EnterFn = (cb: (info: { mode: string | null }) => void) => void
+  type LeaveFn = (cb: () => void) => void
+
+  it('on.enter 懒查询宿主环境并只触发一次 / on.enter lazily queries and fires once', async () => {
+    const { kapi, reply, channels } = loadSdk()
+    const enters: Array<{ mode: string | null }> = []
+    // 未注册时零 RPC / no RPC before registration
+    expect(channels()).toEqual([])
+    ;(kapi.on as never as { enter: EnterFn }).enter((info) => enters.push(info))
+    expect(channels()).toEqual(['kapi:window.getInfo'])
+    reply(1, true, { mode: 'embedded' })
+    await flush()
+    expect(enters).toEqual([{ mode: 'embedded' }])
+    // 再次注册拿缓冲结果，不重复查询 / a later registration gets the buffer, no refetch
+    ;(kapi.on as never as { enter: EnterFn }).enter((info) => enters.push(info))
+    await flush()
+    expect(enters).toEqual([{ mode: 'embedded' }, { mode: 'embedded' }])
+    expect(channels()).toEqual(['kapi:window.getInfo'])
+  })
+
+  it('getInfo 失败应以 {mode: null} 兜底 / getInfo failure falls back to {mode: null}', async () => {
+    const { kapi, reply } = loadSdk()
+    const enters: Array<{ mode: string | null }> = []
+    ;(kapi.on as never as { enter: EnterFn }).enter((info) => enters.push(info))
+    reply(1, false, undefined, 'PluginNotFound: x')
+    await flush()
+    expect(enters).toEqual([{ mode: null }])
+  })
+
+  it('on.leave 在页面卸载时触发一次 / on.leave fires once on unload', async () => {
+    const { kapi, unload } = loadSdk()
+    let leaves = 0
+    ;(kapi.on as never as { leave: LeaveFn }).leave(() => {
+      leaves += 1
+    })
+    expect(leaves).toBe(0)
+    unload()
+    expect(leaves).toBe(1)
+    // 只触发一次 / fires exactly once
+    unload()
+    expect(leaves).toBe(1)
   })
 })

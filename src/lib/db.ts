@@ -7,6 +7,7 @@ import type {
   PluginRow,
   SystemLog,
   LogLevel,
+  PluginEvent,
   Workflow,
   WorkflowRow,
   WorkflowRun,
@@ -283,6 +284,21 @@ export const logDb = {
   async getRecent(limit = 100): Promise<SystemLog[]> {
     return getDb().select<SystemLog[]>(
       'SELECT * FROM system_logs ORDER BY id DESC LIMIT $1',
+      [limit]
+    )
+  },
+}
+
+// ============================================================
+// 插件事件操作 / Plugin event operations
+// events.emit 落库的事件总线历史（docs/DATABASE.md plugin_events）
+// The event-bus history appended by events.emit (docs/DATABASE.md plugin_events)
+// ============================================================
+
+export const eventDb = {
+  async getRecent(limit = 200): Promise<PluginEvent[]> {
+    return getDb().select<PluginEvent[]>(
+      'SELECT * FROM plugin_events ORDER BY id DESC LIMIT $1',
       [limit]
     )
   },

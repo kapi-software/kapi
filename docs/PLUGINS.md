@@ -129,7 +129,18 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 
 ## 4. 桥接 API（已实现：postMessage → plugin_bridge）
 
-插件 UI 通过 `@kapi/plugin-sdk` 调用——宿主在保留路径 `kapi-plugin:///__kapi__/sdk.js` 分发单文件 SDK（构建期内嵌 `src-tauri/assets/kapi-sdk.js`，随宿主版本更新；`__` 前缀的插件 id 被安装校验拒绝，保留段永不落入插件目录）。插件页以 `<script src="/__kapi__/sdk.js"></script>` 引入后使用全局 `kapi` 对象（示例见 `plugins/pluginA`）：存储 / 剪贴板 / HTTP / 日志 / 窗口 / `kapi.plugin.invoke` / 事件（含订阅），调用均为 Promise，错误抛 `BridgeError`（`.code` 为错误码前缀，机器可解析）。SDK 内部走 `postMessage('kapi:*')` → `PluginHost` → `plugin_bridge`（权限检查）→ 执行；也可按 docs/PANEL.md §3 协议裸调 postMessage（SDK 之外的场景）：
+插件 UI 通过 `@kapi/plugin-sdk` 调用——宿主在保留路径 `kapi-plugin:///__kapi__/sdk.js` 分发单文件 SDK（构建期内嵌 `src-tauri/assets/kapi-sdk.js`，随宿主版本更新；`__` 前缀的插件 id 被安装校验拒绝，保留段永不落入插件目录）。插件页以 `<script src="/__kapi__/sdk.js"></script>` 引入后使用全局 `kapi` 对象（示例见 `plugins/pluginA`）：存储 / 剪贴板 / HTTP / 日志 / 窗口 / `kapi.plugin.invoke` / 事件（含订阅），调用均为 Promise，错误抛 `BridgeError`（`.code` 为错误码前缀，机器可解析）。
+
+**API 形态为「RPC + 生命周期事件」混合**（刻意对齐 uTools 的取舍）：请求-响应类能力（storage/http/clipboard…）保持 Promise——组合性、错误码与调用顺序不可替代；宿主主动推送则走回调：
+
+```js
+// 宿主生命周期（onPluginEnter / onPluginOut 同款语义）
+kapi.on.enter(({ mode }) => { ... })   // 进入插件视图；mode = "embedded" | "independent" | null
+                                       // 首次注册时懒查询宿主环境，迟注册拿缓冲结果，每页只触发一次
+kapi.on.leave(() => { ... })           // 离开插件视图（内嵌返回列表 / 独立窗口关闭），pagehide 触发一次
+```
+
+SDK 内部走 `postMessage('kapi:*')` → `PluginHost` → `plugin_bridge`（权限检查）→ 执行；也可按 docs/PANEL.md §3 协议裸调 postMessage（SDK 之外的场景）：
 
 | 通道 | 权限 | 请求 payload | 成功 data |
 | ---- | ---- | ---- | ---- |

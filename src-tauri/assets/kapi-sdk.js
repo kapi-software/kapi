@@ -13,6 +13,52 @@
   var handlers = new Map() // type -> Set<fn>
   var typeRefs = new Map() // type -> 订阅计数（归零才真正退订） / refcount per type
 
+  // ---- 宿主生命周期（uTools onPluginEnter/onPluginOut 同款语义）----
+  // ---- host lifecycle (the same semantics as uTools onPluginEnter/onPluginOut) ----
+  // enter：SDK 加载即向宿主查询环境并缓冲，注册即触发（迟注册也能拿到，只触发一次）
+  // enter: queried from the host at load and buffered; fires on registration (late
+  // registrations get it too) exactly once
+  var enterState = { fired: false, payload: null }
+  var enterCallbacks = []
+  var leaveCallbacks = []
+
+  function safeCall(fn, arg) {
+    try {
+      fn(arg)
+    } catch (err) {
+      // 插件回调抛错不影响其它回调 / one throwing callback never breaks the others
+      setTimeout(function () { throw err }, 0)
+    }
+  }
+
+  function fireEnter(payload) {
+    if (enterState.fired) return
+    enterState.fired = true
+    enterState.payload = payload
+    var cbs = enterCallbacks
+    enterCallbacks = []
+    cbs.forEach(function (fn) { safeCall(fn, payload) })
+  }
+
+  // 懒查询：首次注册 on.enter 才向宿主要环境（不用生命周期的插件零额外调用）
+  // Lazy query: the environment is fetched only when on.enter is first registered
+  // (plugins ignoring lifecycle pay no extra call)
+  var enterRequested = false
+  function requestEnter() {
+    if (enterRequested || enterState.fired) return
+    enterRequested = true
+    call('kapi:window.getInfo', {}).then(
+      function (info) { fireEnter(info || { mode: null }) },
+      function () { fireEnter({ mode: null }) }
+    )
+  }
+
+  function fireLeave() {
+    var cbs = leaveCallbacks
+    leaveCallbacks = []
+    cbs.forEach(function (fn) { safeCall(fn) })
+  }
+
   // 桥接错误：message 形如 "Code: detail"，code 供插件分支处理
   // Bridge error: message looks like "Code: detail"; .code is there for branching
   function BridgeError(message) {
@@ -82,9 +128,12 @@
     global.addEventListener('message', onMessage, false)
   }
 
-  // 页面卸载时尽力退订（嵌入视图被移除时宿主注册表不残留）
-  // Best-effort unsubscribe on unload (no stale entries when an embed view is removed)
+  // 页面卸载：先触发 leave 回调（内嵌返回列表 / 独立窗口关闭都走这条），再尽力退订
+  // （嵌入视图被移除时宿主注册表不残留）
+  // Page unload: fire leave callbacks first (embed-back-to-list and window close both
+  // land here), then best-effort unsubscribe (no stale host entries)
   function releaseAll() {
+    fireLeave()
     typeRefs.forEach(function (_count, type) {
       call('kapi:events.off', { type: type }).catch(function () {})
     })
@@ -99,6 +148,31 @@
     // 宿主 API 版本（对应 manifest 的 kapi_version）
     // Host API version (matches the manifest's kapi_version)
     version: '1.0.0',
+
+    // 宿主生命周期回调（uTools onPluginEnter/onPluginOut 同款语义）
+    // Host lifecycle callbacks (the same semantics as uTools onPluginEnter/onPluginOut)
+    on: {
+      // 进入插件视图时触发：callback({mode, ...})；mode = "embedded" | "independent" | null
+      // Fires when the plugin view is entered: callback({mode}); late registrations
+      // still receive it, exactly once per page load
+      enter: function (callback) {
+        if (typeof callback !== 'function') return
+        if (enterState.fired) {
+          // 已触发：微任务投递，保持异步语义一致
+          // Already fired: deliver on a microtask to keep the async semantics uniform
+          Promise.resolve().then(function () { safeCall(callback, enterState.payload) })
+        } else {
+          enterCallbacks.push(callback)
+          requestEnter()
+        }
+      },
+      // 离开插件视图时触发（内嵌返回列表 / 独立窗口关闭），无参数、只触发一次
+      // Fires when the plugin view is left (embed back to list / window close);
+      // no arguments, exactly once
+      leave: function (callback) {
+        if (typeof callback === 'function') leaveCallbacks.push(callback)
+      },
+    },
 
     storage: {
       // 读自身命名空间的键；返回 {value}（JSON 值或 null）

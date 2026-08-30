@@ -9,7 +9,7 @@ Kapi 技术文档：主面板布局、路由、PluginHost 与设置系统。
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │ ┌────────┐ ┌───────────────────────────────────────────────────┐ │
-│ │ Logo    │ │  顶栏 (面包屑 + 全局搜索 + 窗口控制)              │ │
+│ │ Logo    │ │  顶栏 (面包屑 + 窗口控制)                        │ │
 │ ├────────┤ ├───────────────────────────────────────────────────┤ │
 │ │ 导航    │ │                                                   │ │
 │ │         │ │              内容区域                             │ │
@@ -47,7 +47,7 @@ Kapi 技术文档：主面板布局、路由、PluginHost 与设置系统。
 | `/plugin-window/:id` | 插件独立壳 | `PluginWindowShell` | 独立窗口加载的**裸壳路由**（无侧边栏），内嵌同一 `PluginHost` |
 | `/workflow` | 工作流列表 | `WorkflowPage` | 列表、启停、手动运行、运行历史 |
 | `/workflow/:id` | 工作流编辑器 | `WorkflowEditor` | React Flow 画布编辑 DAG |
-| `/logs` | 日志 | `LogsPage` | system_logs 过滤查看 |
+| `/logs` | 日志 | `LogsPage` | system_logs 过滤查看 + plugin_events 事件历史（双视图） |
 | `/settings` | 设置 | `SettingsPage` | 见 §4 |
 
 ## 3. 插件内嵌视图与 PluginHost（核心组件）

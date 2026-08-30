@@ -1,5 +1,5 @@
-// 主面板顶栏（sidebar-16 布局）：全宽置顶，侧边栏切换 + 面包屑 + 搜索 + 窗口控制
-// Panel top bar (sidebar-16 layout): full-width on top with sidebar toggle, breadcrumb, search and window controls
+// 主面板顶栏（sidebar-16 布局）：全宽置顶，侧边栏切换 + 面包屑 + 窗口控制
+// Panel top bar (sidebar-16 layout): full-width on top with sidebar toggle, breadcrumb and window controls
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router-dom";
 import { Minus, PanelLeft, Square, X } from "lucide-react";
@@ -8,7 +8,6 @@ import { isTauri } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { SearchForm } from "@/components/search-form";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -97,8 +96,8 @@ function PageBreadcrumb() {
   );
 }
 
-// 主面板顶栏：可拖拽（无边框窗口）+ 侧边栏切换 + 面包屑 + 搜索 + 窗口控制
-// Draggable top bar (frameless) + sidebar toggle + breadcrumb + search + window controls
+// 主面板顶栏：可拖拽（无边框窗口）+ 侧边栏切换 + 面包屑 + 窗口控制
+// Draggable top bar (frameless) + sidebar toggle + breadcrumb + window controls
 export function TopBar() {
   const { t } = useTranslation();
   const { toggleSidebar } = useSidebar();
@@ -123,7 +122,7 @@ export function TopBar() {
         </Button>
         {/* <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" /> */}
         <PageBreadcrumb />
-        <SearchForm className="w-full sm:ml-auto sm:w-auto" />
+        <div className="ml-auto" data-tauri-drag-region />
         <WindowControls />
       </div>
     </header>
