@@ -1,16 +1,17 @@
-// 插件市场页：GitHub 目录源浏览 + 安装/更新（docs/PLUGINS.md §7）
-// Store page: browse a GitHub dir source and install/update (docs/PLUGINS.md §7)
+// 插件市场页：索引源浏览 + 安装/更新（docs/PLUGINS.md §7）
+// Store page: browse the index source and install/update (docs/PLUGINS.md §7)
+// 列表缓存优先（settings.store.index），仅手动刷新回源 index.json
+// Cache-first listing (settings.store.index); only a manual refresh hits index.json
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Download, RefreshCw, Save } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardFooter, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePluginsStore } from "@/stores/plugins";
-import { loadStoreRepo, saveStoreRepo, type StoreEntry } from "@/lib/store";
+import type { StoreEntry } from "@/lib/store";
 import { isTauri } from "@/lib/tauri";
 
 // 单个市场卡片：元信息 + 安装/更新/已安装态
@@ -27,7 +28,7 @@ function StoreCard({
   busy: boolean;
 }) {
   const { t } = useTranslation();
-  const upToDate = installedVersion === entry.version;
+  const upToDate = installedVersion === (entry.version ?? "?");
 
   return (
     <Card>
@@ -35,8 +36,8 @@ function StoreCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate font-semibold">{entry.name}</h3>
-              <Badge variant="secondary">v{entry.version}</Badge>
+              <h3 className="truncate font-semibold">{entry.name ?? entry.id}</h3>
+              {entry.version && <Badge variant="secondary">v{entry.version}</Badge>}
               {entry.category && <Badge variant="outline">{entry.category}</Badge>}
               {installedVersion !== null && (
                 <Badge variant={upToDate ? "secondary" : "default"}>
@@ -78,20 +79,18 @@ function StoreCard({
 export default function Store() {
   const { t } = useTranslation();
   const { plugins, load, listStore, installFromStore } = usePluginsStore();
-  const [repo, setRepo] = useState("");
-  const [repoInput, setRepoInput] = useState("");
   const [entries, setEntries] = useState<StoreEntry[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [busyDir, setBusyDir] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  // 拉取市场列表（repo 变化触发；失败 toast，保留旧列表）
-  // Fetch the listing (on repo change); failures toast and keep the old list
+  // 拉取列表：manual=true 强制回源并更新缓存，否则缓存优先
+  // Fetch the listing: manual=true refetches and updates the cache, else cache-first
   const refresh = useCallback(
-    async (source: string) => {
-      if (!isTauri() || !source) return;
+    async (manual = false) => {
+      if (!isTauri()) return;
       setLoading(true);
       try {
-        setEntries(await listStore(source));
+        setEntries(await listStore(manual));
       } catch (e) {
         toast.error(String(e));
       } finally {
@@ -101,50 +100,28 @@ export default function Store() {
     [listStore]
   );
 
-  // 初始化：已安装列表 + 持久化的源
-  // Init: installed list + persisted source
+  // 挂载：已安装列表 + 缓存的市场列表
+  // Mount: the installed list plus the cached store listing
   useEffect(() => {
     load();
-    loadStoreRepo().then((saved) => {
-      setRepo(saved);
-      setRepoInput(saved);
-    });
-  }, [load]);
-
-  // 源就绪或变更即拉取（初始 repo 为空串时跳过）
-  // Fetch when the source is ready or changes (the initial empty repo is a no-op)
-  useEffect(() => {
-    if (repo) void refresh(repo);
-  }, [repo, refresh]);
-
-  // 保存源并刷新 / persist the source and refresh
-  const handleSaveRepo = async () => {
-    const next = repoInput.trim();
-    if (!next) return;
-    try {
-      await saveStoreRepo(next);
-      setRepo(next);
-      toast.success(t("store.repoSaved"));
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
+    refresh();
+  }, [load, refresh]);
 
   const handleInstall = async (entry: StoreEntry) => {
-    setBusyDir(entry.dir);
+    setBusyId(entry.id);
     const updating = plugins.some((p) => p.id === entry.id);
     try {
-      await installFromStore(repo, entry.dir);
+      await installFromStore(entry.repo, entry.dir ?? null);
       toast.success(
         updating
-          ? t("store.toastUpdated", { name: entry.name })
-          : t("plugins.toastInstalled", { name: entry.name })
+          ? t("store.toastUpdated", { name: entry.name ?? entry.id })
+          : t("plugins.toastInstalled", { name: entry.name ?? entry.id })
       );
-      await refresh(repo);
+      await refresh();
     } catch (e) {
       toast.error(String(e));
     } finally {
-      setBusyDir(null);
+      setBusyId(null);
     }
   };
 
@@ -157,33 +134,11 @@ export default function Store() {
           <h1 className="text-2xl font-bold">{t("store.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("store.desc")}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={loading || !repo}
-          onClick={() => refresh(repo)}
-        >
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => refresh(true)}>
           <RefreshCw className={loading ? "animate-spin" : undefined} />
           {t("store.refresh")}
         </Button>
       </div>
-
-      {/* 源配置：owner/name，持久化 settings.store.repo */}
-      {/* Source config: owner/name, persisted to settings.store.repo */}
-      <div className="mt-4 flex items-center gap-2">
-        <Input
-          value={repoInput}
-          onChange={(e) => setRepoInput(e.target.value)}
-          placeholder="owner/name"
-          className="max-w-xs font-mono text-xs"
-          aria-label={t("store.repo")}
-        />
-        <Button size="sm" variant="outline" disabled={!repoInput.trim() || repoInput.trim() === repo} onClick={handleSaveRepo}>
-          <Save />
-          {t("store.save")}
-        </Button>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground/70">{t("store.repoHint")}</p>
 
       <div className="mt-6">
         {loading && entries === null ? (
@@ -205,11 +160,11 @@ export default function Store() {
           <div className="grid gap-4 md:grid-cols-2">
             {entries.map((entry) => (
               <StoreCard
-                key={entry.dir}
+                key={entry.id}
                 entry={entry}
                 installedVersion={installedVersions.get(entry.id) ?? null}
                 onInstall={handleInstall}
-                busy={busyDir === entry.dir}
+                busy={busyId === entry.id}
               />
             ))}
           </div>

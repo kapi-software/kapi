@@ -8,7 +8,7 @@
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::AppHandle;
 
 use crate::plugin_manager::install_from_dir;
@@ -59,86 +59,140 @@ pub(crate) fn is_valid_dir_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-// 顶层目录列表：contents API 取目录项，逐个拉 manifest 并发解析
-// Top-level dir listing: the contents API dirs, each manifest fetched and parsed in parallel
+// 市场索引 URL：kapi-plugins 仓库的静态 index.json（raw.githubusercontent 自带 CDN 缓存）；
+// Cloudflare Worker 上线后仅需替换此常量，JSON 契约不变
+// Store index URL: the static index.json in the kapi-plugins repo (raw.githubusercontent
+// is CDN-cached already); once the Cloudflare Worker lands only this constant changes —
+// the JSON contract stays
+const STORE_INDEX_URL: &str =
+    "https://raw.githubusercontent.com/kapi-software/kapi-plugins/HEAD/index.json";
+
+// 本地缓存键（settings 表，值为索引原文；打开市场页先读缓存，手动刷新才回源）
+// Local cache key (settings table, the verbatim index body; the store page reads the
+// cache first and only a manual refresh hits the source)
+const STORE_CACHE_KEY: &str = "store.index";
+
+// 索引条目（index.json plugins[] 元素；serde 直接反序列化 + 校验）
+// Index entry (one plugins[] element of index.json; deserialized and validated)
+#[derive(serde::Deserialize, serde::Serialize)]
+struct StoreIndexEntry {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    // 插件独立仓库 owner/name（或承载它的索引仓库）
+    // The plugin's own repo as owner/name (or the index repo hosting it)
+    repo: String,
+    // 仓库内插件目录；缺省 = 仓库根即插件包
+    // In-repo plugin dir; a missing value means the repo root is the plugin package
+    #[serde(default)]
+    dir: Option<String>,
+}
+
+// 索引解析（纯函数）：结构校验 + 条目过滤（repo/dir 非法直接丢弃，不拖垮整表）
+// Index parsing (pure): structural validation; invalid repo/dir entries are dropped
+// without sinking the whole listing
+fn parse_store_index(body: &str) -> Result<Vec<StoreIndexEntry>, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("InvalidPayload: bad index json ({e})"))?;
+    let Some(arr) = v.get("plugins").and_then(Value::as_array) else {
+        return Err("InvalidPayload: index json has no plugins array".into());
+    };
+    let mut out = Vec::new();
+    for item in arr.iter().take(MAX_LISTED_PLUGINS) {
+        let Ok(entry) = serde_json::from_value::<StoreIndexEntry>(item.clone()) else {
+            continue;
+        };
+        if entry.id.trim().is_empty() || !is_valid_repo(&entry.repo) {
+            continue;
+        }
+        if let Some(dir) = &entry.dir {
+            if !is_valid_dir_name(dir) {
+                continue;
+            }
+        }
+        out.push(entry);
+    }
+    Ok(out)
+}
+
+// 读缓存：命中返回索引原文 / read the cache: the verbatim body on a hit
+async fn read_index_cache(pool: &sqlx::SqlitePool) -> Result<Option<String>, String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = ?")
+            .bind(STORE_CACHE_KEY)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("StorageError: {e}"))?;
+    Ok(row.map(|(v,)| v))
+}
+
+// 写缓存：索引原文原样落库（解析按次进行，缓存格式与源一致）
+// write the cache: the body verbatim (parsing stays per-use; the cache mirrors the source)
+async fn write_index_cache(pool: &sqlx::SqlitePool, body: &str) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+    )
+    .bind(STORE_CACHE_KEY)
+    .bind(body)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("StorageError: {e}"))?;
+    Ok(())
+}
+
+// 市场列表：refresh=false 读缓存（无缓存则回源）；refresh=true 强制回源并更新缓存
+// Store listing: refresh=false serves the cache (fetching only when empty);
+// refresh=true forces a refetch and updates the cache
 #[tauri::command]
-pub async fn store_list(repo: String) -> Result<Value, String> {
-    if !is_valid_repo(&repo) {
-        return Err(format!("InvalidRepo: {repo}"));
+pub async fn store_list(app: AppHandle, refresh: bool) -> Result<Value, String> {
+    let pool = crate::plugin_manager::sqlite_pool(&app).await?;
+
+    if !refresh {
+        if let Some(cached) = read_index_cache(&pool).await? {
+            let entries = parse_store_index(&cached)?;
+            return Ok(serde_json::to_value(entries).map_err(|e| e.to_string())?);
+        }
     }
 
-    let listing: Value = store_client()
-        .get(format!("https://api.github.com/repos/{repo}/contents"))
+    let body = store_client()
+        .get(STORE_INDEX_URL)
         .send()
         .await
         .map_err(|e| format!("HttpError: {e}"))?
         .error_for_status()
         .map_err(|e| format!("HttpError: {e}"))?
-        .json()
+        .text()
         .await
         .map_err(|e| format!("HttpError: {e}"))?;
-
-    let dirs: Vec<String> = listing
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter(|e| e.get("type").and_then(Value::as_str) == Some("dir"))
-                .filter_map(|e| e.get("name").and_then(Value::as_str))
-                .filter(|n| is_valid_dir_name(n))
-                .map(|n| n.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-    if dirs.is_empty() {
-        return Ok(json!([]));
-    }
-    let dirs: Vec<String> = dirs.into_iter().take(MAX_LISTED_PLUGINS).collect();
-
-    // 并发拉 manifest（JoinSet；单条失败只跳过该插件，不拖垮列表）
-    // Fetch manifests concurrently (JoinSet); a failed fetch skips that plugin only
-    let mut set = tokio::task::JoinSet::new();
-    for dir in dirs {
-        let url = format!("https://raw.githubusercontent.com/{repo}/HEAD/{dir}/manifest.json");
-        set.spawn(async move {
-            let manifest: Value = match store_client().get(url).send().await {
-                Ok(resp) => match resp.error_for_status() {
-                    Ok(resp) => resp.json().await.unwrap_or(Value::Null),
-                    Err(_) => Value::Null,
-                },
-                Err(_) => Value::Null,
-            };
-            (dir, manifest)
-        });
-    }
-
-    let mut out = Vec::new();
-    while let Some(joined) = set.join_next().await {
-        let Ok((dir, manifest)) = joined else { continue };
-        let str_field = |k: &str| manifest.get(k).and_then(Value::as_str).map(str::to_string);
-        let Some(id) = str_field("id") else { continue };
-        out.push(json!({
-            "dir": dir,
-            "id": id,
-            "name": str_field("name").unwrap_or_else(|| id.clone()),
-            "version": str_field("version").unwrap_or_else(|| "?".into()),
-            "author": str_field("author"),
-            "description": str_field("description"),
-            "category": str_field("category"),
-        }));
-    }
-    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    Ok(Value::Array(out))
+    let entries = parse_store_index(&body)?;
+    write_index_cache(&pool, &body).await?;
+    Ok(serde_json::to_value(entries).map_err(|e| e.to_string())?)
 }
 
-// 下载 + 防护提取 + 安装/更新：zipball → 只取目标目录子树 → 临时目录 → install_from_dir
-// Download + guarded extraction + install/update: zipball -> target subtree only ->
-// temp dir -> install_from_dir
+// 下载 + 防护提取 + 安装/更新：zipball → 目标子树（仓库根或 <根>/<dir>/）→ 临时目录
+// → install_from_dir
+// Download + guarded extraction + install/update: zipball -> the target subtree (the
+// repo root or <root>/<dir>/) -> temp dir -> install_from_dir
 #[tauri::command]
-pub async fn store_install(app: AppHandle, repo: String, dir: String) -> Result<Value, String> {
+pub async fn store_install(
+    app: AppHandle,
+    repo: String,
+    dir: Option<String>,
+) -> Result<Value, String> {
     if !is_valid_repo(&repo) {
         return Err(format!("InvalidRepo: {repo}"));
     }
-    if !is_valid_dir_name(&dir) {
+    // dir 缺省 = 插件仓库根即插件包 / a missing dir means the repo root is the package
+    let dir = dir.unwrap_or_default();
+    if !dir.is_empty() && !is_valid_dir_name(&dir) {
         return Err(format!("InvalidDir: {dir}"));
     }
 
@@ -228,7 +282,14 @@ async fn extract_plugin_subtree(
                 _ => return Err("HttpError: zipball has no root prefix".into()),
             }
         };
-        let subtree = format!("{root_prefix}{dir}/");
+        // 子树前缀：dir 空 = 仓库根即插件包（独立插件仓库），否则 <根>/<dir>/
+        // Subtree prefix: an empty dir means the repo root is the plugin package (an
+        // independent plugin repo); otherwise <root>/<dir>/
+        let subtree = if dir.is_empty() {
+            root_prefix.clone()
+        } else {
+            format!("{root_prefix}{dir}/")
+        };
 
         let mut total: u64 = 0;
         let mut matched = false;
@@ -311,7 +372,7 @@ mod tests {
 
     #[test]
     fn validates_repo_and_dir_names() {
-        assert!(is_valid_repo("kapi-plugins/kapi-plugins"));
+        assert!(is_valid_repo("kapi-software/kapi-plugins"));
         assert!(is_valid_repo("a.b_c/d-e.f"));
         assert!(!is_valid_repo("../x"));
         assert!(!is_valid_repo("owner"));
@@ -321,6 +382,47 @@ mod tests {
         assert!(is_valid_dir_name("plugin-a"));
         assert!(!is_valid_dir_name("../evil"));
         assert!(!is_valid_dir_name(""));
+    }
+
+    // ---- 索引解析 / index parsing ----
+
+    #[test]
+    fn parses_index_entries_with_optional_dir() {
+        let body = r#"{
+            "plugins": [
+                { "id": "com.kapi.clipboard", "repo": "kapi-software/kapi-plugins-clipboard" },
+                { "id": "com.a", "name": "A", "version": "1.0.0", "repo": "kapi-software/kapi-plugins", "dir": "pluginA" }
+            ]
+        }"#;
+        let entries = parse_store_index(body).unwrap();
+        assert_eq!(entries.len(), 2);
+        // 独立仓库：dir 缺省 = 仓库根即插件包 / independent repo: no dir means the root
+        assert_eq!(entries[0].repo, "kapi-software/kapi-plugins-clipboard");
+        assert!(entries[0].dir.is_none());
+        // 索引仓库子目录形态 / the in-repo subdir shape
+        assert_eq!(entries[1].dir.as_deref(), Some("pluginA"));
+    }
+
+    #[test]
+    fn index_parsing_drops_invalid_entries_but_keeps_the_rest() {
+        let body = r#"{
+            "plugins": [
+                { "id": "", "repo": "a/b" },
+                { "id": "com.no-repo" },
+                { "id": "com.bad-repo", "repo": "../evil" },
+                { "id": "com.bad-dir", "repo": "a/b", "dir": "../up" },
+                { "id": "com.good", "repo": "a/b", "dir": "pkg" }
+            ]
+        }"#;
+        let entries = parse_store_index(body).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "com.good");
+    }
+
+    #[test]
+    fn index_parsing_rejects_structural_errors() {
+        assert!(parse_store_index("{ not json").is_err());
+        assert!(parse_store_index(r#"{"no_plugins": []}"#).is_err());
     }
 
     // ---- zip 条目名安全 / zip entry-name safety ----
@@ -387,6 +489,24 @@ mod tests {
         assert!(out.join("web/index.html").is_file());
         // 其它插件目录不落盘 / sibling plugin dirs never land on disk
         assert!(!out.join("README.md").exists());
+        let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    #[tokio::test]
+    async fn extracts_repo_root_when_dir_empty() {
+        // 独立插件仓库：zipball 根即插件包（manifest 在仓库根，README/LICENSE 一并落盘无害）
+        // An independent plugin repo: the zipball root is the package (manifest at the
+        // repo root; README/LICENSE landing alongside is harmless)
+        let zip = build_zip(&[
+            ("repo-clip/manifest.json", b"{\"id\":\"com.kapi.clipboard\"}"),
+            ("repo-clip/web/index.html", b"<html>clip</html>"),
+            ("repo-clip/README.md", b"readme"),
+        ]);
+        let dest = temp_dest("root");
+        let out = extract_plugin_subtree(zip, "", &dest).await.unwrap();
+        assert!(out.join("manifest.json").is_file());
+        assert!(out.join("web/index.html").is_file());
+        assert!(out.join("README.md").is_file());
         let _ = std::fs::remove_dir_all(&dest);
     }
 

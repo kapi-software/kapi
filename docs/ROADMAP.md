@@ -32,7 +32,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] wasmtime 运行时（wasmtime 48 + WASI p1：ABI v1 / 单宿主导入 kapi_host_call 复用桥接分发 / fuel 10 亿 + 5s epoch + 64MiB 内存限制 / 模块缓存与 evict；pluginD 全链路示例 + fixture 单测，2026-08-25）
 - [x] headless 启动（立即执行默认动作：run 优先 → 首个 action，成败写 system_logs；Phase 6 工作流接管编排，2026-08-25）
 - [x] @kapi/plugin-sdk 前端 SDK（保留路径 `/__kapi__/sdk.js` 分发 + kapi.events.on/off 订阅推送链路 + pluginA 示范，2026-08-30）
-- [x] 插件市场（GitHub 目录源浏览 / 安装 / 更新：store_list + store_install 防护提取与更新语义，源可配 store.repo，2026-08-30）
+- [x] 插件市场（索引源 + 独立插件仓库：store_list 缓存优先 / store_install 防护提取与更新语义，Cloudflare Worker 契约预留，2026-08-30）
 
 ## 3. 待开发清单
 

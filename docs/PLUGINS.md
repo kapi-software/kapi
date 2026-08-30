@@ -204,8 +204,9 @@ SDK 内部走 `postMessage('kapi:*')` → `PluginHost` → `plugin_bridge`（权
 
 ## 7. 插件市场（已实现：`src-tauri/src/store.rs`）
 
-- **源格式**：GitHub 仓库**顶层每个目录 = 一个插件**（内含 `manifest.json`）。缺省源 [`kapi-software/kapi-plugins`](https://github.com/kapi-software/kapi-plugins)（官方示例插件仓库），市场页可改（`owner/name`，持久化 `settings.store.repo`）。GitHub API 匿名限流 60 次/时/IP，开发期够用；鉴权与 Release 资产源属后续演进。
-- **浏览 `store_list(repo)`**：contents API 列顶层目录（≤60），`raw.githubusercontent` 并发拉各 manifest，只取展示字段（id/name/version/author/description/category）；畸形 manifest 跳过不拖垮列表。
-- **安装/更新 `store_install(repo, dir)`**：zipball（≤100 MiB）→ **防护提取**只解压 `<zip 根>/<dir>/` 子树到临时目录 → 复用 `install_from_dir` 校验安装（manifest 校验、entry 存在性、路径安全与本地导入完全一致）→ 清理临时目录。防护：条目数 ≤2000、解压总量 ≤200 MiB、条目名逐段校验（拒绝 `..`/绝对路径/反斜杠/空段）、符号链接条目拒绝。
+- **索引源模型**：[`kapi-software/kapi-plugins`](https://github.com/kapi-software/kapi-plugins) 仓库只维护插件目录与链接（`index.json`），**不放插件工程**——每个插件是独立仓库（`repo: owner/name`，仓库根即插件包：`manifest.json` + `web/` + 可选 `main.wasm`）；可选 `dir` 字段指向仓库内子目录（官方测试样例 pluginA–D 以此形态留在索引仓库）。索引 URL 固化于 Rust 常量（`raw.githubusercontent` 自带 CDN 缓存）；**Cloudflare Worker 上线后仅替换该 URL，index.json 契约不变**。GitHub API 匿名限流 60 次/时/IP，开发期够用；鉴权与 Release 资产源属后续演进。
+- **本地缓存**：索引原文存 `settings` 表 `store.index` 键；打开市场页**缓存优先**，仅手动「刷新」或首次无缓存才回源——日常使用零请求。
+- **浏览 `store_list(refresh)`**：解析校验索引（id 非空、repo/dir 格式；非法条目丢弃不拖垮列表，上限 60），返回展示字段 + `repo`/`dir`（安装回传）。
+- **安装/更新 `store_install(repo, dir?)`**：插件仓库 zipball（≤100 MiB）→ **防护提取**只解压目标子树（`dir` 空 = 仓库根）到临时目录 → 复用 `install_from_dir` 校验安装（manifest 校验、entry 存在性、路径安全与本地导入完全一致）→ 清理临时目录。防护：条目数 ≤2000、解压总量 ≤200 MiB、条目名逐段校验（拒绝 `..`/绝对路径/反斜杠/空段）、符号链接条目拒绝。
 - **更新语义**（`allow_update`）：已装同名插件走 `UPDATE`——目录整体替换（先关其独立窗口），元数据/manifest/入口以新版为准，**保留 `is_enabled` 与 `sort_order`**；`window_mode` 保留，新 manifest 不再支持时回退推导默认；wasm 缓存 evict。本地导入（`plugin_install`）遇已装仍拒绝，更新只走市场。
 - **卸载**在插件管理页（两步确认），市场页不重复提供。
