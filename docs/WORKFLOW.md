@@ -102,4 +102,54 @@ struct WorkflowContext {
 
 - **真正的 DAG 语义**：按拓扑序调度，无依赖关系的节点**并行执行**，数据流由 `bindings` 显式映射。
 - **两级日志**：`workflow_runs`（一次触发）+ `workflow_step_logs`（每节点输入/输出/耗时），编辑器与日志页可逐步回放。
+
+---
+
+## §4 Phase 6 落地说明
+
+> 本节记录 Phase 6 已实现部分与尚未实现的扩展点。
+
+### 4.1 已实现
+
+| 能力 | 文件 | 说明 |
+| ---- | ---- | ---- |
+| DAG 调度 | `src-tauri/src/workflow_engine.rs` | Kahn 拓扑排序，fail_fast，节点内 `tokio::join!` 并发 |
+| plugin 节点执行 | `workflow_engine.rs::execute_one_node` | 调用 `WasmRuntime::invoke_action` |
+| transform 节点 | `workflow_engine.rs::execute_one_node` | 记录 warning 日志后跳过（占位） |
+| 两级日志 | `workflow_engine.rs` | `workflow_runs` + `workflow_step_logs` |
+| Manual 触发命令 | `src-tauri/src/lib.rs` | `workflow_execute / workflow_get / workflow_list / workflow_save / workflow_delete / workflow_runs` |
+| 前端 store | `src/stores/workflows.ts` | Zustand store（模式同 `plugins.ts`） |
+| Workflow 页面 | `src/pages/Workflow.tsx` | 列表 + 内嵌 JSON 编辑 + 手动运行 |
+
+### 4.2 尚未实现（扩展点）
+
+| 扩展点 | 状态 | 说明 |
+| ------ | ---- | ---- |
+| clipboard 触发器 | 占位 | `TriggerType::Clipboard`，需 `tauri-plugin-clipboard-manager` 轮询 |
+| hotkey 触发器 | 占位 | `TriggerType::Hotkey`，需 `tauri-plugin-global-shortcut` |
+| schedule 触发器 | 占位 | `TriggerType::Schedule`，需 `tokio::time::interval` |
+| plugin_event 触发器 | 占位 | `TriggerType::PluginEvent`，需监听 `plugin_events` 表 |
+| transform 节点实现 | 占位 | JSON 模板映射（`jq` 或手动拼装） |
+| React Flow 可视化编辑器 | 待做 | Phase 7 目标，当前 v1 为内嵌 JSON 编辑 |
+
+### 4.3 数据库表
+
+参见 `docs/DATABASE.md` §6（三表：`workflows` / `workflow_runs` / `workflow_step_logs`）。
+
+### 4.4 API 命令
+
+所有命令均通过 Tauri `invoke` 调用：
+
+| 命令 | 参数 | 返回 |
+| ---- | ---- | ---- |
+| `workflow_execute` | `{ workflowId }` | `WorkflowRun` |
+| `workflow_get` | `{ workflowId }` | `Workflow \| null` |
+| `workflow_list` | — | `Workflow[]` |
+| `workflow_save` | `{ workflow: Workflow }` | `()` |
+| `workflow_delete` | `{ workflowId }` | `()` |
+| `workflow_runs` | `{ workflowId, limit }` | `WorkflowRun[]` |
+| `workflow_run_steps` | `{ runId }` | `WorkflowStepLog[]` |
+
+---
+
 - **触发器**：clipboard 用 `tauri-plugin-clipboard-manager` 监听；hotkey 用 `tauri-plugin-global-shortcut`；schedule 用 tokio 定时；plugin_event 监听事件总线（`plugin_events` 表）。

@@ -98,6 +98,7 @@ struct CachedModule {
 
 // WASM 运行时：Engine + 跨 Store 复用的 Linker + 模块缓存
 // WASM runtime: the Engine, a Store-reusable Linker and the module cache
+#[derive(Clone)]
 pub struct WasmRuntime {
     engine: Engine,
     linker: Arc<Linker<WasmCallCtx>>,

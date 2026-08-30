@@ -8,8 +8,11 @@ mod plugin_protocol;
 mod store;
 mod tray;
 mod wasm_runtime;
+mod workflow_engine;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -45,7 +48,14 @@ pub fn run() {
             plugin_manager::launch_plugin,
             store::store_list,
             store::store_install,
-            tray::tray_set_language
+            tray::tray_set_language,
+            workflow_engine::workflow_execute,
+            workflow_engine::workflow_get,
+            workflow_engine::workflow_list,
+            workflow_engine::workflow_save,
+            workflow_engine::workflow_delete,
+            workflow_engine::workflow_runs,
+            workflow_engine::workflow_run_steps
         ])
         // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单；独立插件窗口销毁时清理事件订阅
         // Closing the main window hides it to the tray; a destroyed plugin window purges
@@ -68,6 +78,23 @@ pub fn run() {
             // 事件推送总线：注入宿主句柄（events.emit 扇出用）
             // Event push bus: inject the host handle (used by the events.emit fan-out)
             plugin_bridge::init_event_bus(app.handle().clone());
+            // 工作流引擎：复用 .manage 的 WASM 运行时与 sqlite_pool 取出的池
+            // Workflow engine: reuse the managed WASM runtime and the pool from sqlite_pool
+            let app_handle = app.handle().clone();
+            // Tauri state 持有原值；clone 后装入 Arc 共享给 WorkflowEngine
+            // The Tauri state owns the value; clone then wrap in Arc to share with the engine
+            let wasm = Arc::new(
+                app.state::<wasm_runtime::WasmRuntime>()
+                    .inner()
+                    .clone(),
+            );
+            let pool_for_engine = tauri::async_runtime::block_on(async move {
+                plugin_manager::sqlite_pool(&app_handle).await
+            })?;
+            app.manage(Arc::new(workflow_engine::WorkflowEngine::new(
+                wasm, // Arc<WasmRuntime>
+                pool_for_engine,
+            )));
             // Dock 服务：启动定位 + 热区轮询线程（docs/DOCK.md）
             // Dock service: startup positioning + hotzone polling thread (docs/DOCK.md)
             dock::start(app.handle().clone());
