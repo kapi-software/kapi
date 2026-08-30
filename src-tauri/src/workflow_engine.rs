@@ -750,6 +750,30 @@ pub async fn engine_from_app(app: &AppHandle) -> Result<(Arc<WorkflowEngine>, Sq
     Ok((engine, pool))
 }
 
+// 直接打开一份 SQLite 池（与 plugin-sql 共用同一 DB 文件）
+// Open a dedicated SQLite pool (shares the same DB file as plugin-sql)
+// plugin-sql 的 DbInstances 是 lazy 模式（前端调用 load 才填池 + 跑迁移）
+// plugin-sql's DbInstances is lazy (pool filled + migrations run on the frontend's load command)
+// 工作流命令路径由用户主动触发，此时前端早已 load，故直接用 app_config_dir 打开同一 DB 即可
+// The workflow command path is triggered by user action, by which time the frontend has already loaded.
+// Just open the same DB file via app_config_dir.
+pub async fn open_pool_with_migrations(app: &AppHandle) -> Result<SqlitePool, String> {
+    use tauri::Manager;
+    // 与 plugin-sql wrapper.rs 保持一致：app_config_dir + sqlite:kapi.db
+    // Match plugin-sql wrapper.rs: app_config_dir + sqlite:kapi.db
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("PathError: {e}"))?;
+    let _ = std::fs::create_dir_all(&dir);
+    let db_path = dir.join("kapi.db");
+    let url = format!("sqlite://{}?mode=rwc", db_path.display());
+    let pool = sqlx::SqlitePool::connect(&url)
+        .await
+        .map_err(|e| format!("StorageError: cannot open {} ({e})", db_path.display()))?;
+    Ok(pool)
+}
+
 #[tauri::command]
 pub async fn workflow_execute(
     app: AppHandle,

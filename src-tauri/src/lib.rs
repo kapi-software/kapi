@@ -78,18 +78,20 @@ pub fn run() {
             // 事件推送总线：注入宿主句柄（events.emit 扇出用）
             // Event push bus: inject the host handle (used by the events.emit fan-out)
             plugin_bridge::init_event_bus(app.handle().clone());
-            // 工作流引擎：复用 .manage 的 WASM 运行时与 sqlite_pool 取出的池
-            // Workflow engine: reuse the managed WASM runtime and the pool from sqlite_pool
-            let app_handle = app.handle().clone();
-            // Tauri state 持有原值；clone 后装入 Arc 共享给 WorkflowEngine
-            // The Tauri state owns the value; clone then wrap in Arc to share with the engine
+            // 工作流引擎：setup 阶段直接新建一个 SQLite 池，与 plugin-sql 共用同一 DB 文件
+            // Workflow engine: open a dedicated SQLite pool during setup (same DB file as plugin-sql)
+            // plugin-sql 的 DbInstances 仅在 load 命令被前端调用后才填池（lazy 模式）
+            // plugin-sql's DbInstances only fills in on the load command (lazy)
+            // 工作流命令路径无需等前端 load，因此这里直接连 + apply migrations
+            // The workflow command path doesn't wait for the frontend load; connect + migrate here
             let wasm = Arc::new(
                 app.state::<wasm_runtime::WasmRuntime>()
                     .inner()
                     .clone(),
             );
+            let app_handle = app.handle().clone();
             let pool_for_engine = tauri::async_runtime::block_on(async move {
-                plugin_manager::sqlite_pool(&app_handle).await
+                workflow_engine::open_pool_with_migrations(&app_handle).await
             })?;
             app.manage(Arc::new(workflow_engine::WorkflowEngine::new(
                 wasm, // Arc<WasmRuntime>
