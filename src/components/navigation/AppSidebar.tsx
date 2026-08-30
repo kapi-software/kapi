@@ -1,33 +1,38 @@
-// 应用侧边栏（sidebar-16 布局）：经典实体侧边栏，从全宽顶栏下方开始
-// App sidebar (sidebar-16 layout): classic solid sidebar starting below the full-width header
-// 分组定义见 docs/PANEL.md §1；面包屑复用本文件的 NAV_GROUPS
-// Group definitions follow docs/PANEL.md §1; the breadcrumb reuses NAV_GROUPS below
+// 应用侧边栏：分组导航 + 底部 Header (Dropdown) 切换日志/设置
+// App sidebar: grouped nav + bottom Header (Dropdown) for Logs/Settings
 import { useTranslation } from "react-i18next";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
+  ChevronUp,
   Home,
-  Puzzle,
+  Layers,
   PackageOpen,
-  Workflow as WorkflowIcon,
+  Puzzle,
   ScrollText,
   Settings as SettingsIcon,
-  Layers,
+  Workflow as WorkflowIcon,
   type LucideIcon,
 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
-// 导航分组与路由项（概览 / 插件 / 自动化 / 系统）
-// Nav groups and route items (overview / plugins / automation / system)
+// 主导航分组（日志/设置从底部 Dropdown 跳转，不在主菜单内）
+// Main nav groups (Logs/Settings live in the footer dropdown)
 export const NAV_GROUPS: Array<{
   groupKey: string;
   items: Array<{ to: string; labelKey: string; icon: LucideIcon; end: boolean }>;
@@ -47,22 +52,14 @@ export const NAV_GROUPS: Array<{
     groupKey: "nav.groupAutomation",
     items: [{ to: "/workflow", labelKey: "nav.workflow", icon: WorkflowIcon, end: false }],
   },
-  {
-    groupKey: "nav.groupSystem",
-    items: [
-      { to: "/logs", labelKey: "nav.logs", icon: ScrollText, end: false },
-      { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon, end: false },
-    ],
-  },
 ];
 
-// 展平的导航项（面包屑查找用）
-// Flattened nav items (for breadcrumb lookup)
+// 展平的导航项（用于面包屑/路由查找）
+// Flattened nav items (for breadcrumb/route lookup)
 export const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
 
 // 判断路由是否激活：end 项精确匹配，其余前缀匹配子路由
 // Route active check: exact for end items, prefix match for child routes
-// isNavItemActive('/plugins', '/plugins', true) => false; isNavItemActive('/plugins/x', '/plugins', false) => true
 export function isNavItemActive(pathname: string, to: string, end: boolean): boolean {
   if (end) return pathname === to
   return pathname === to || pathname.startsWith(`${to}/`)
@@ -71,34 +68,13 @@ export function isNavItemActive(pathname: string, to: string, end: boolean): boo
 export function AppSidebar() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   return (
-    // sidebar-16：固定面板从顶栏下方开始（--header-height 由 SidebarProvider 注入）
-    // sidebar-16: the fixed panel starts below the header (--header-height injected by SidebarProvider)
     <Sidebar
       collapsible="icon"
       className="top-(--header-height) h-[calc(100svh-var(--header-height))]!"
     >
-      {/* 应用名：点击回首页；图标折叠模式下自动缩为 Logo */}
-      {/* App name: click returns home; collapses to the logo in icon mode */}
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <NavLink to="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <Layers className="size-4" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">{t("app.name")}</span>
-                  <span className="truncate text-xs">{t("app.tagline")}</span>
-                </div>
-              </NavLink>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-
       <SidebarContent>
         {NAV_GROUPS.map(({ groupKey, items }) => (
           <SidebarGroup key={groupKey}>
@@ -107,8 +83,6 @@ export function AppSidebar() {
               <SidebarMenu>
                 {items.map(({ to, labelKey, icon: Icon, end }) => (
                   <SidebarMenuItem key={to}>
-                    {/* tooltip 仅供图标折叠态显示完整名称 */}
-                    {/* The tooltip only shows the full label in icon-collapsed mode */}
                     <SidebarMenuButton
                       isActive={isNavItemActive(pathname, to, end)}
                       tooltip={t(labelKey)}
@@ -126,6 +100,48 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+
+      {/* 底部：点击 Header 触发 Dropdown 跳转到日志/设置 */}
+      {/* Bottom: click the header to open a Dropdown for Logs/Settings */}
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton
+                  size="lg"
+                  tooltip={t("sidebar.more")}
+                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                >
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                    <Layers className="size-4" />
+                  </div>
+                  <div className="flex flex-col gap-0.5 leading-none">
+                    <span className="font-semibold">{t("app.name")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t("app.tagline")}
+                    </span>
+                  </div>
+                  <ChevronUp className="ml-auto size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-(--radix-dropdown-menu-trigger-width)"
+                align="start"
+              >
+                <DropdownMenuItem onSelect={() => navigate("/logs")}>
+                  <ScrollText className="size-4" />
+                  {t("nav.logs")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate("/settings")}>
+                  <SettingsIcon className="size-4" />
+                  {t("nav.settings")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

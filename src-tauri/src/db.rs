@@ -27,6 +27,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/003_wal.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "workflow trigger registry",
+            sql: include_str!("../migrations/004_workflow_triggers.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

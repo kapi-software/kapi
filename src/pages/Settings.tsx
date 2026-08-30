@@ -178,12 +178,7 @@ export default function Settings() {
   const dockDisabled = !settings.dock_enabled;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">{t("settings.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
       {/* 通用 / General */}
       <Card>
         <CardHeader>

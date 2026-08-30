@@ -1,64 +1,23 @@
-// 内嵌插件视图：/plugin/:id（面板外壳内的 PluginHost，docs/PANEL.md）
-// Embedded plugin view: /plugin/:id (PluginHost inside the panel shell)
-import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+// 内嵌插件视图：/plugin/:id（独立页面，无标题/简介/返回按钮，由 TopBar 提供返回）
+// Embedded plugin view: /plugin/:id (standalone, no header/description/back button)
+import { useParams, useSearchParams } from "react-router-dom";
 import { PluginHost } from "@/components/plugin/PluginHost";
-import { isTauri } from "@/lib/tauri";
 import { safeEntry } from "@/lib/plugin-url";
-import { initDb, pluginDb } from "@/lib/db";
-import type { Plugin } from "@/types";
 
 export default function PluginEmbedView() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   // 形态入口由 plugin:navigate 携带来（App.tsx 拼进 ?entry=），非法值回退 index.html
   // The per-shape entry arrives via plugin:navigate (App.tsx appends ?entry=); invalid → index.html
   const [searchParams] = useSearchParams();
   const entry = safeEntry(searchParams.get("entry"));
-  const [plugin, setPlugin] = useState<Plugin | null>(null);
-
-  // 插件元信息仅用于页头展示；iframe 加载不依赖它
-  // Plugin metadata is for the header only; the iframe loads independently
-  useEffect(() => {
-    if (!id || !isTauri()) return;
-    let cancelled = false;
-    initDb()
-      .then(() => pluginDb.getById(id))
-      .then((p) => {
-        if (!cancelled) setPlugin(p);
-      })
-      .catch((e) => console.error("插件信息加载失败 / plugin info load failed:", e));
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
-
   if (!id) return null;
-
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-          <ArrowLeft />
-        </Button>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-semibold">
-              {plugin?.name ?? id}
-            </h1>
-            {plugin && <Badge variant="secondary">v{plugin.version}</Badge>}
-          </div>
-          {plugin?.description && (
-            <p className="truncate text-xs text-muted-foreground">{plugin.description}</p>
-          )}
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
-        <PluginHost pluginId={id} entry={entry} />
-      </div>
+    // flex-1 min-h-0 在 flex-col 父容器中精确填满剩余空间，避开 main padding 的影响
+    // -m-3 md:-m-4 反向抵消 StandaloneLayout main 的 p-3 md:p-4
+    // flex-1 min-h-0 reliably fills the remaining space inside a flex-col parent
+    // -m-3 md:-m-4 counters StandaloneLayout main's padding
+    <div className="-m-3 flex min-h-0 flex-1 flex-col overflow-hidden md:-m-4">
+      <PluginHost pluginId={id} entry={entry} className="flex-1" />
     </div>
   );
 }
