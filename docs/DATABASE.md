@@ -15,6 +15,7 @@ Kapi 技术文档：SQLite 表结构、迁移与前端访问层。
 | `plugins` | 已安装插件注册表 | 被 plugin_data / plugin_events 引用 |
 | `plugin_data` | 插件隔离的 KV 存储（每插件仅能访问自己的命名空间） | `(plugin_id, key)` 复合主键 |
 | `workflows` | 工作流定义（DAG 图存 JSON） | — |
+| `workflow_triggers` | 工作流触发器（schedule / plugin_event / clipboard / hotkey） | CASCADE 删随 workflow |
 | `workflow_runs` | 工作流执行实例（一次触发一条） | CASCADE 删随 workflow |
 | `workflow_step_logs` | 步骤级执行日志（输入/输出/耗时，可追溯） | CASCADE 删随 run |
 | `settings` | **统一**应用设置表（含 `dock_*` 前缀项，无独立 dock 表） | — |
@@ -65,6 +66,18 @@ CREATE TABLE workflows (
     is_enabled  INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============ 工作流触发器 ============
+CREATE TABLE workflow_triggers (
+    id            TEXT PRIMARY KEY,
+    workflow_id   TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    trigger_type  TEXT NOT NULL
+                  CHECK (trigger_type IN ('schedule', 'plugin_event', 'clipboard', 'hotkey')),
+    config        TEXT NOT NULL,         -- JSON: {cron} / {event_type} / {content_type} / {hotkey}
+    is_enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ============ 工作流执行实例 ============
@@ -126,6 +139,7 @@ CREATE INDEX idx_plugins_category   ON plugins(category);
 CREATE INDEX idx_plugins_sort       ON plugins(sort_order);
 CREATE INDEX idx_runs_workflow      ON workflow_runs(workflow_id, started_at);
 CREATE INDEX idx_step_logs_run      ON workflow_step_logs(run_id);
+CREATE INDEX idx_triggers_workflow  ON workflow_triggers(workflow_id);
 CREATE INDEX idx_events_type        ON plugin_events(event_type, created_at);
 CREATE INDEX idx_events_plugin      ON plugin_events(source_plugin_id);
 CREATE INDEX idx_syslogs_level      ON system_logs(level);
@@ -171,9 +185,31 @@ src-tauri/migrations/
 
 ## 6. 数据库访问层（前端）
 
-完整实现见 `src/lib/db.ts`（`pluginDb` / `pluginDataDb` / `workflowDb` / `settingsDb` / `logDb`）。要点：
+完整实现见 `src/lib/db.ts`（`pluginDb` / `pluginDataDb` / `workflowDb` / `workflowTriggerDb` / `settingsDb` / `eventDb` / `logDb`）。要点：
 
 - `initDb()` 仅获取连接，迁移已由 Rust 完成；重复调用复用连接
 - `pluginDb` 返回解析后的对象（`manifest` / `window_config` 反序列化）
 - `workflowDb.getRuns()` 两级查询：runs + 批量步骤日志
+- `workflowTriggerDb` 触发器 CRUD（save / delete / list）
+- `eventDb.getRecent()` 获取历史事件（用于 PluginEvent 触发器事件类型选择）
 - `settingsDb.set()` 使用 `ON CONFLICT DO UPDATE` upsert
+
+## 7. 触发器配置 JSON 格式
+
+```typescript
+// schedule: { cron: string }
+{ "cron": "0 * * * * *" }        // 每分钟
+{ "cron": "0 9 * * *" }          // 每天 9:00
+{ "cron": "*/5 * * * *" }        // 每 5 分钟
+
+// plugin_event: { event_type: string }
+{ "event_type": "clipboard.changed" }
+
+// clipboard: { content_type?: 'text' | 'image' }
+{ "content_type": "text" }
+{}
+
+// hotkey: { hotkey: string }
+{ "hotkey": "CmdOrCtrl+Shift+B" }
+{ "hotkey": "Alt+Space" }
+```

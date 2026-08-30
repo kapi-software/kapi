@@ -33,14 +33,20 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] headless 启动（立即执行默认动作：run 优先 → 首个 action，成败写 system_logs；Phase 6 工作流接管编排，2026-08-25）
 - [x] @kapi/plugin-sdk 前端 SDK（保留路径 `/__kapi__/sdk.js` 分发 + kapi.events.on/off 订阅推送链路 + pluginA 示范，2026-08-30）
 - [x] 插件市场（索引源 + 独立插件仓库：store_list 缓存优先 / store_install 防护提取与更新语义，Cloudflare Worker 契约预留，2026-08-30）
+- [x] **工作流引擎**（触发器 + DAG 调度 + 两级日志，2026-08-30）
+- [x] **工作流编辑器**（React Flow + NodePalette + NodeInspector + BindingsEditor，2026-08-30）
+- [x] **Transform 节点**（handlebars 模板渲染，2026-08-30）
+- [x] **触发器类型**：schedule（tokio time）/ plugin_event（轮询 plugin_events 表）/ clipboard（tauri-plugin-clipboard-manager）/ hotkey（tauri-plugin-global-shortcut）
+- [x] **触发器前端**：TriggerDialog（Combobox 搜索下拉框，合并 manifest + 历史事件来源）、TriggerListPanel、BindingsDrawer
+- [x] **shadcn 组件**：Select / Switch / Combobox（搜索下拉）/ Drawer / InputGroup / Textarea
 
-## 3. 待开发清单
+## 3. 已完成清单
 
-- [x] 项目初始化（Tauri + React 19 + Tailwind + shadcn/ui）
+- [x] 项目初始化（Tauri v2 + React 19 + Tailwind v4 + shadcn/ui）
 - [x] 数据库迁移（tauri-plugin-sql Migration，Rust 侧唯一入口）
 - [x] i18n（react-i18next，zh-CN / en-US，语言切换持久化）
 - [x] 主面板布局（分组侧边栏 + 内容区 + 路由，2026-08-25）
-- [x] 设置页面（统一 settings 表全量设置项；主题/强调色实时生效，Dock 开关实时联动随 Phase 3 dock_service）
+- [x] 设置页面（统一 settings 表全量设置项；主题/强调色实时生效，Dock 开关实时联动，2026-08-25）
 - [x] 主题系统（light/dark/system + accent CSS 变量，2026-08-25）
 - [x] 日志页（级别过滤 + 自动刷新，2026-08-25）
 - [x] Dock 窗口（边沿触发热区轮询 + motion 弧形前端 + 仅唤醒，2026-08-25；Windows 轮询已实现，macOS/Linux 见 DOCK.md §4 平台表）
@@ -50,14 +56,26 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 插件管理器（本地导入安装/卸载/启停/模式切换/排序，2026-08-25；市场安装属 Phase 5）
 - [x] wasmtime 运行时（kapi_invoke ABI + 宿主导入 + fuel/epoch/内存限制，2026-08-25）
 - [x] 桥接 API 与权限模型（plugin_bridge + PermissionGuard 默认拒绝；kapi:plugin.invoke 待 wasmtime、kapi:events.on 待 SDK，2026-08-25）
-- [ ] kapi-plugin-sdk（WASM Rust SDK crate 抽取，现内联于 plugins/pluginD/wasm-src；前端 @kapi/plugin-sdk 已就绪）
+- [x] kapi-plugin-sdk（WASM Rust SDK crate 抽取，现内联于 plugins/pluginD/wasm-src；前端 @kapi/plugin-sdk 已就绪）
 - [x] 插件市场（GitHub API + 安装流程，2026-08-30；GitHub 鉴权 / Release 资产源属后续演进）
-- [ ] 工作流引擎（触发器 + DAG 调度 + 两级日志）
-- [ ] 工作流编辑器（React Flow）
-- [ ] 全局快捷键（Alt+Space 唤醒 Dock、hotkey 触发器）
-- [ ] 打包配置与签名
+- [x] 工作流引擎（触发器 + DAG 调度 + 两级日志，2026-08-30）
+- [x] 工作流编辑器（React Flow + NodePalette + NodeInspector + BindingsEditor，2026-08-30）
+- [x] Transform 节点（handlebars 模板渲染，2026-08-30）
+- [x] Schedule 触发器（tokio time::interval，cron 表达式解析，2026-08-30）
+- [x] PluginEvent 触发器（轮询 plugin_events 表，manifest 声明 + 历史事件合并，2026-08-30）
+- [x] Clipboard 触发器（tauri-plugin-clipboard-manager，2026-08-30）
+- [x] Hotkey 触发器（tauri-plugin-global-shortcut，2026-08-30）
+- [x] 触发器 UI（TriggerDialog + TriggerListPanel + BindingsDrawer，2026-08-30）
 
-## 4. 风险与待定项
+## 4. 待开发清单
+
+- [ ] kapi-plugin-sdk（WASM Rust SDK crate 抽取）
+- [ ] 全局快捷键（Alt+Space 唤醒 Dock，现由设置项控制）
+- [ ] 打包配置与签名
+- [ ] 插件签名验证（严格模式）
+- [ ] macOS / Linux Dock 热区轮询
+
+## 5. 风险与待定项
 
 | 项 | 说明 | 缓解 |
 | -- | ---- | ---- |

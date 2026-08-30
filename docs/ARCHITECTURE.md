@@ -22,7 +22,7 @@ Kapi 技术文档：项目概述、应用架构、技术实现。
 | **主面板** | 左侧导航（首页/插件/插件市场/工作流/日志/设置）+ 右侧内容区 |
 | **Dock 侧边栏** | 弧形布局的插件快速启动栏，仅负责唤醒，鼠标悬停展开 |
 | **插件系统** | WASM 沙箱逻辑 + Web UI，支持 embedded / independent / headless 三种模式 |
-| **工作流系统** | 插件间数据联动与自动化编排（触发器 + DAG 步骤图） |
+| **工作流系统** | 插件间数据联动与自动化编排（触发器 + DAG 步骤图 + 数据绑定） |
 | **本地数据库** | SQLite 存储所有应用数据 |
 
 ### 1.3 技术栈
@@ -31,7 +31,7 @@ Kapi 技术文档：项目概述、应用架构、技术实现。
 | ------ | -------- |
 | 应用框架 | Tauri v2 |
 | 前端框架 | React 19 + TypeScript |
-| 样式方案 | Tailwind CSS + shadcn/ui |
+| 样式方案 | Tailwind CSS v4 + shadcn/ui |
 | 状态管理 | Zustand |
 | 路由 | React Router v7（v6 API 兼容） |
 | Dock 动画 | motion (framer-motion)，对齐 Electron 版 Dock 实现 |
@@ -93,8 +93,9 @@ Kapi 技术文档：项目概述、应用架构、技术实现。
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                    SQLite 数据库 (本地存储)                          │   │
-│  │  plugins │ plugin_data │ workflows │ workflow_runs                  │   │
-│  │  workflow_step_logs │ settings │ plugin_events │ system_logs       │   │
+│  │  plugins │ plugin_data │ workflows │ workflow_triggers              │   │
+│  │  workflow_runs │ workflow_step_logs │ settings │ plugin_events      │   │
+│  │  system_logs                                                        │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -138,6 +139,9 @@ kapi/
 ├── src/
 │   ├── components/
 │   │   ├── ui/                          # shadcn/ui
+│   │   │   ├── combobox.tsx             # 搜索下拉框（base-ui）
+│   │   │   ├── input-group.tsx          # 输入组
+│   │   │   └── textarea.tsx            # 多行文本
 │   │   ├── navigation/
 │   │   │   ├── AppSidebar.tsx           # 主面板侧边栏（shadcn Sidebar）
 │   │   │   └── TopBar.tsx
@@ -150,28 +154,35 @@ kapi/
 │   │   │   └── PluginCard.tsx
 │   │   └── workflow/
 │   │       ├── WorkflowCanvas.tsx       # React Flow 画布
-│   │       ├── WorkflowNode.tsx
-│   │       └── WorkflowRunPanel.tsx     # 运行历史/步骤日志
+│   │       ├── WorkflowNodeCard.tsx     # 自定义节点（plugin / transform）
+│   │       ├── NodePalette.tsx          # 节点面板（按插件分组）
+│   │       ├── TriggerDialog.tsx        # 触发器配置（Combobox + Select）
+│   │       ├── TriggerListPanel.tsx    # 触发器列表
+│   │       ├── BindingsDrawer.tsx       # 数据绑定编辑器
+│   │       └── RunHistoryPanel.tsx     # 运行历史
 │   ├── pages/
 │   │   ├── Dashboard.tsx
 │   │   ├── Plugins.tsx
 │   │   ├── Store.tsx
-│   │   ├── Workflow.tsx
-│   │   ├── PluginEmbedView.tsx          # /plugin/:id（带侧边栏外壳）
+│   │   ├── Workflow.tsx                # 工作流列表
+│   │   ├── WorkflowEditor.tsx           # 工作流编辑器（React Flow）
+│   │   ├── WorkflowRuns.tsx            # 运行历史
+│   │   ├── PluginEmbedView.tsx         # /plugin/:id（带侧边栏外壳）
 │   │   ├── PluginWindowShell.tsx        # /plugin-window/:id（独立窗口裸壳）
 │   │   ├── Logs.tsx
 │   │   └── Settings.tsx
 │   ├── stores/
 │   │   ├── settings.ts
-│   │   ├── plugins.ts
-│   │   └── workflow.ts
+│   │   ├── plugins.ts                  # 插件状态 + getDistinctEventTypes()
+│   │   ├── workflows.ts                # 工作流状态
+│   │   └── triggers.ts                  # 触发器状态
 │   ├── i18n/                            # react-i18next + TS 语言包
 │   ├── lib/
 │   │   ├── db.ts                        # 数据库访问层（见 DATABASE.md）
 │   │   ├── tauri.ts                     # Tauri 桥接
 │   │   └── dock-arc.ts                  # 弧线纯函数计算
 │   ├── types/
-│   │   └── index.ts
+│   │   └── index.ts                     # Workflow / WorkflowNode / WorkflowTrigger 等
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── routes.tsx
@@ -180,11 +191,11 @@ kapi/
 │   │   ├── main.rs
 │   │   ├── lib.rs                       # Builder 装配：插件注册/迁移/协议/命令
 │   │   ├── db.rs                        # 连接与迁移装配
-│   │   ├── dock_service.rs              # 热区轮询（边沿触发，见 DOCK.md）
+│   │   ├── dock_service.rs             # 热区轮询（边沿触发，见 DOCK.md）
 │   │   ├── plugin_manager.rs            # 安装/卸载/窗口创建
 │   │   ├── plugin_protocol.rs           # kapi-plugin:// 自定义协议
-│   │   ├── plugin_bridge.rs             # 统一权限检查 + 桥接分发
-│   │   ├── wasm_runtime.rs              # wasmtime 运行时（见 PLUGINS.md）
+│   │   ├── plugin_bridge.rs            # 统一权限检查 + 桥接分发（storage.* / events.* / actions.*）
+│   │   ├── wasm_runtime.rs             # wasmtime 运行时（见 PLUGINS.md）
 │   │   ├── workflow_engine.rs           # DAG 调度引擎（见 WORKFLOW.md）
 │   │   └── store.rs                     # 插件市场（GitHub 源 + 防护提取）
 │   ├── migrations/
@@ -227,49 +238,19 @@ pub fn migrations() -> Vec<Migration> {
 //     )
 ```
 
-### 3.3 Tauri 命令（v2 API）——已实现
+### 3.3 Tauri 命令（v2 API）
 
-`launch_plugin` / `plugin_install` / `plugin_uninstall` 落地于 `src-tauri/src/plugin_manager.rs`（经 `DbInstances` 共享前端创建的 SQLite 连接池）；安装流程：manifest 校验 → 复制到 `plugins/{id}` → 写表（失败回滚目录）。`store_list` / `store_install` 落地于 `src-tauri/src/store.rs`（GitHub 目录源浏览与安装/更新，见 PLUGINS.md §7）。
-
-```rust
-// src-tauri/src/plugin_manager.rs（节选）
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-
-// 统一插件启动入口（Dock / 主面板 / 快捷键共用）
-#[tauri::command]
-async fn launch_plugin(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
-    let plugin = state.plugin_manager.get(&plugin_id).await?;
-
-    match plugin.window_mode.as_str() {
-        // 内嵌：通知主窗口路由切换；主窗口隐藏时先唤起
-        "embedded" => {
-            if let Some(win) = app.get_webview_window("main") {
-                win.show().map_err(|e| e.to_string())?;
-                win.set_focus().map_err(|e| e.to_string())?;
-                win.emit("plugin:navigate", &plugin_id).map_err(|e| e.to_string())?;
-            }
-            Ok(())
-        }
-        // 独立窗口：存在则聚焦，不存在按 manifest.window 创建
-        "independent" => {
-            let label = format!("plugin-{}", plugin_id.replace('.', "_"));  // label 禁 "."
-            if let Some(win) = app.get_webview_window(&label) {
-                win.show().map_err(|e| e.to_string())?;
-                win.set_focus().map_err(|e| e.to_string())?;
-            } else {
-                state.plugin_manager.create_window(&app, &plugin).await?;
-            }
-            Ok(())
-        }
-        // headless：直接执行一次默认动作（工作流插件）
-        _ => state.workflow_engine.execute_plugin_once(&plugin_id).await,
-    }
-}
-```
+| 命令 | 文件 | 说明 |
+| ---- | ---- | ---- |
+| `launch_plugin` | `plugin_manager.rs` | 统一插件启动入口，按 window_mode 分发 |
+| `plugin_install` | `plugin_manager.rs` | 本地导入插件 |
+| `plugin_uninstall` | `plugin_manager.rs` | 卸载插件 |
+| `plugin_bridge` | `plugin_bridge.rs` | 插件桥接（storage.* / events.* / actions.*） |
+| `workflow_execute` | `lib.rs` | 执行工作流 |
+| `workflow_*` | `lib.rs` | CRUD + 运行历史 |
+| `trigger_*` | `lib.rs` | 触发器 CRUD |
+| `store_list` | `store.rs` | 插件市场列表 |
+| `store_install` | `store.rs` | 市场安装 |
 
 `plugin_bridge` **已实现**（`src-tauri/src/plugin_bridge.rs`）：权限检查（`PermissionGuard`，manifest 按次加载、默认拒绝）+ 通道路由 + 各通道 handler；`window` 参数由 Tauri 注入（调用方窗口），`kapi:window.*` 借此限定只能操控插件自己的独立窗口。通道、payload 与错误码全表见 PLUGINS.md §4。
 
@@ -328,3 +309,20 @@ http://kapi-plugin.localhost/<plugin_id>/<path>   (Windows / WebView2)
 ```
 
 主面板**关闭 = 隐藏复用**（Rust 拦截 `CloseRequested` → prevent + hide，对齐 Electron 的 close 拦截模式），应用退出流程中放行。
+
+### 3.6 工作流引擎架构
+
+触发器管理在 Rust 侧独立运行：
+
+```text
+WorkflowEngine
+├── wasm: Arc<WasmRuntime>              # WASM 运行时（已实现）
+├── triggers: TriggerManager            # 内存态触发器注册表
+│   ├── schedule: HashMap<trigger_id, tokio::time::Interval>
+│   ├── plugin_event: HashMap<trigger_id, last_event_id>
+│   ├── clipboard: Stream (tauri-plugin-clipboard-manager)
+│   └── hotkey: Stream (tauri-plugin-global-shortcut)
+└── poll_interval: Duration             # plugin_event 轮询间隔（默认 500ms）
+```
+
+TriggerManager 在应用启动时从 `workflow_triggers` 表加载所有启用的触发器，工作流编辑器保存/删除触发器时实时更新注册表。
