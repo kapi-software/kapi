@@ -39,6 +39,7 @@ impl TriggerType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "clipboard" => Some(Self::Clipboard),
@@ -53,6 +54,7 @@ impl TriggerType {
 
 // 触发器条目（v1 占位：内存注册表，后续按 trigger_type 分派）
 // Trigger entry (v1 placeholder: in-memory registry; dispatch by trigger_type later)
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TriggerEntry {
     pub trigger_type: TriggerType,
