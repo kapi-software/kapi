@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { initDb, pluginDb } from "@/lib/db";
 import type { Plugin, WindowMode } from "@/types";
+import type { StoreEntry } from "@/lib/store";
 
 // 变更后通知其它窗口（Dock 重载列表）；失败不影响本地刷新
 // Notify other windows after mutations (the Dock reloads); failures don't block local refresh
@@ -21,6 +22,10 @@ interface PluginsState {
   loading: boolean;
   load: () => Promise<void>;
   installFromDir: (sourceDir: string) => Promise<Plugin>;
+  // 市场安装/更新：下载校验复制在 Rust，落库后统一刷新广播
+  // Store install/update: Rust downloads/validates/copies; we refresh and broadcast after
+  installFromStore: (repo: string, dir: string) => Promise<Plugin>;
+  listStore: (repo: string) => Promise<StoreEntry[]>;
   uninstall: (id: string) => Promise<void>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
   setWindowMode: (id: string, mode: WindowMode) => Promise<void>;
@@ -51,6 +56,23 @@ export const usePluginsStore = create<PluginsState>((set, get) => ({
     await get().load();
     await broadcastChanged();
     return plugin;
+  },
+
+  // 市场安装/更新：Rust 下载 zipball + 防护提取 + 校验入库，返回新插件
+  // Store install/update: Rust fetches the zipball, extracts guarded, validates and
+  // writes the row; returns the plugin
+  async installFromStore(repo, dir) {
+    const plugin = await invoke<Plugin>("store_install", { repo, dir });
+    await get().load();
+    await broadcastChanged();
+    return plugin;
+  },
+
+  // 市场列表：Rust 拉取目录源与 manifest（非 Tauri 环境自然报错，页面兜底提示）
+  // Store listing: Rust fetches the dir source and manifests (non-Tauri errors out;
+  // the page surfaces the hint)
+  async listStore(repo) {
+    return invoke<StoreEntry[]>("store_list", { repo });
   },
 
   async uninstall(id) {

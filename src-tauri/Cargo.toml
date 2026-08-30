@@ -40,7 +40,7 @@ arboard = "3"
 # Aligned with the transitive 0.13 already in the lockfile; webpki-roots bundles the CA store
 # 注：0.13 起 feature 更名（rustls-tls → rustls + webpki-roots）
 # Note: features were renamed in 0.13 (rustls-tls -> rustls + webpki-roots)
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots"] }
 url = "2"
 # WASM 运行时（docs/PLUGINS.md §5）：cranelift + wat（单测用 WAT）；与 wasmtime-wasi 严格同版本
 # WASM runtime (docs/PLUGINS.md §5): cranelift + wat (for WAT unit tests); must match wasmtime-wasi
@@ -60,6 +60,7 @@ wasmtime-wasi = { version = "48.0.1", default-features = false, features = ["p1"
 # WASM 执行放 spawn_blocking，宿主函数内经 Handle::block_on 桥接异步 DB/HTTP；macros 供 #[tokio::test]
 # WASM runs in spawn_blocking; host functions bridge async DB/HTTP via Handle::block_on; macros for tests
 tokio = { version = "1", features = ["rt", "macros"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 # Dock 光标轮询（docs/DOCK.md §4）：仅 Windows 需要 Win32 API
 # Dock cursor polling (docs/DOCK.md §4): Win32 API needed on Windows only

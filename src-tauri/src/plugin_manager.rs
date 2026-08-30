@@ -419,34 +419,55 @@ fn row_to_plugin(row: &sqlx::sqlite::SqliteRow) -> Result<Value, String> {
 // Install from a local dir: validate the manifest, copy to plugins/{id}, insert the row
 #[tauri::command]
 pub async fn plugin_install(app: AppHandle, source_dir: String) -> Result<Value, String> {
-    let src = PathBuf::from(&source_dir);
-    let manifest_json = std::fs::read_to_string(src.join("manifest.json")).map_err(|_| {
+    install_from_dir(&app, &PathBuf::from(&source_dir), false).await
+}
+
+// 安装核心（本地导入与市场安装共用）：校验 → 复制 → 插入或更新行
+// allow_update：已安装同名插件时按"更新"处理（市场路径）；本地导入保持拒绝
+// Install core (shared by local import and the store): validate -> copy -> insert-or-update.
+// allow_update: a same-id plugin updates in place (the store path); local import still rejects
+pub(crate) async fn install_from_dir(
+    app: &AppHandle,
+    source_dir: &Path,
+    allow_update: bool,
+) -> Result<Value, String> {
+    let manifest_json = std::fs::read_to_string(source_dir.join("manifest.json")).map_err(|_| {
         format!(
-            "读取 manifest.json 失败 / cannot read manifest.json under {source_dir}"
+            "读取 manifest.json 失败 / cannot read manifest.json under {}",
+            source_dir.display()
         )
     })?;
 
-    let has_web = src.join("web/index.html").is_file();
-    let has_wasm = src.join("main.wasm").is_file();
+    let has_web = source_dir.join("web/index.html").is_file();
+    let has_wasm = source_dir.join("main.wasm").is_file();
     let plan = plan_install(&manifest_json, has_web, has_wasm)?;
     // windows[] 入口文件存在性核验（纯函数校验之外的 IO 检查）
     // windows[] entry existence (the IO check beyond the pure validation)
-    ensure_entries_exist(&src, &resolve_supported_windows(&manifest_json, has_web, has_wasm)?)?;
+    ensure_entries_exist(source_dir, &resolve_supported_windows(&manifest_json, has_web, has_wasm)?)?;
 
-    let pool = sqlite_pool(&app).await?;
+    let pool = sqlite_pool(app).await?;
 
-    // 已安装同名插件 → 拒绝（更新流程属插件市场，Phase 5）
-    // Same-id plugin already installed -> reject (updates belong to the store, Phase 5)
+    // 已安装同名插件：本地导入拒绝；市场更新走 UPDATE（保留启停/排序）
+    // Same-id plugin: local import rejects; the store updates in place (keeping enable/order)
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugins WHERE id = ?")
         .bind(&plan.manifest.id)
         .fetch_one(&pool)
         .await
         .map_err(|e| e.to_string())?;
-    if count > 0 {
+    if count > 0 && !allow_update {
         return Err(format!(
             "插件已安装，请先卸载 / plugin already installed: {}",
             plan.manifest.id
         ));
+    }
+
+    // 更新时替换文件，先关掉还开着的独立窗口（避免旧页面挂在被替换的目录上）
+    // On update, close a still-open independent window first (its page sits on the
+    // directory being replaced)
+    if count > 0 {
+        if let Some(win) = app.get_webview_window(&plugin_window_label(&plan.manifest.id)) {
+            let _ = win.close();
+        }
     }
 
     let dest = app
@@ -455,46 +476,95 @@ pub async fn plugin_install(app: AppHandle, source_dir: String) -> Result<Value,
         .map_err(|e| e.to_string())?
         .join("plugins")
         .join(&plan.manifest.id);
-    // 残留目录自愈：无库记录的历史目录直接清理后重装
-    // Self-healing stale dir: a leftover dir with no DB row is removed before reinstall
+    // 残留目录自愈：无库记录的历史目录直接清理后重装；更新路径同样先清再拷
+    // Self-healing stale dir: a leftover dir with no DB row is removed before reinstall;
+    // the update path likewise clears before copying
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
             .map_err(|e| format!("清理残留目录失败 / failed to clean stale dir: {e}"))?;
     }
-    copy_dir_recursive(&src, &dest)?;
+    copy_dir_recursive(source_dir, &dest)?;
 
-    // 入库；sort_order 追加到队尾（Dock 与插件列表共用排序）
-    // Insert; sort_order appended at the end (shared by the Dock and plugin list)
-    let inserted = sqlx::query(
-        "INSERT INTO plugins (id, name, version, author, description, icon, category, manifest,
-            install_path, wasm_path, web_path, window_mode, window_config,
-            is_enabled, is_installed, sort_order)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1,
-            (SELECT COALESCE(MAX(sort_order),-1)+1 FROM plugins))",
-    )
-    .bind(&plan.manifest.id)
-    .bind(&plan.manifest.name)
-    .bind(&plan.manifest.version)
-    .bind(&plan.manifest.author)
-    .bind(&plan.manifest.description)
-    .bind(&plan.manifest.icon)
-    .bind(&plan.manifest.category)
-    .bind(&plan.manifest_json)
-    .bind(dest.to_string_lossy().as_ref())
-    .bind(&plan.wasm_path)
-    .bind(&plan.web_path)
-    .bind(&plan.window_mode)
-    .bind(&plan.window_config)
-    .execute(&pool)
-    .await;
+    if count > 0 {
+        // 更新：窗口模式保留（新 manifest 不再支持时回退推导默认），其余元数据以新版为准
+        // Update: keep window_mode (falling back to the derived default when the new
+        // manifest no longer supports it); the rest of the metadata follows the new version
+        let current_mode: String = sqlx::query_scalar("SELECT window_mode FROM plugins WHERE id = ?")
+            .bind(&plan.manifest.id)
+            .fetch_one(&pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        let supported = resolve_supported_windows(&manifest_json, has_web, has_wasm)?;
+        let keep_mode = match current_mode.as_str() {
+            "embedded" => supported.embedded.is_some(),
+            "independent" => supported.independent.is_some(),
+            "headless" => supported.headless,
+            _ => false,
+        };
+        let window_mode = if keep_mode { current_mode } else { plan.window_mode.clone() };
 
-    if let Err(e) = inserted {
-        // 入库失败回滚目录，避免残留
-        // Roll back the copied dir on insert failure
-        let _ = std::fs::remove_dir_all(&dest);
-        return Err(format!(
-            "写入 plugins 表失败 / failed to insert into plugins: {e}"
-        ));
+        let updated = sqlx::query(
+            "UPDATE plugins SET name=?, version=?, author=?, description=?, icon=?, category=?,
+                manifest=?, install_path=?, wasm_path=?, web_path=?, window_mode=?, window_config=?,
+                updated_at=CURRENT_TIMESTAMP
+             WHERE id=?",
+        )
+        .bind(&plan.manifest.name)
+        .bind(&plan.manifest.version)
+        .bind(&plan.manifest.author)
+        .bind(&plan.manifest.description)
+        .bind(&plan.manifest.icon)
+        .bind(&plan.manifest.category)
+        .bind(&plan.manifest_json)
+        .bind(dest.to_string_lossy().as_ref())
+        .bind(&plan.wasm_path)
+        .bind(&plan.web_path)
+        .bind(&window_mode)
+        .bind(&plan.window_config)
+        .bind(&plan.manifest.id)
+        .execute(&pool)
+        .await;
+
+        if let Err(e) = updated {
+            let _ = std::fs::remove_dir_all(&dest);
+            return Err(format!(
+                "更新 plugins 行失败 / failed to update plugins row: {e}"
+            ));
+        }
+    } else {
+        // 入库；sort_order 追加到队尾（Dock 与插件列表共用排序）
+        // Insert; sort_order appended at the end (shared by the Dock and plugin list)
+        let inserted = sqlx::query(
+            "INSERT INTO plugins (id, name, version, author, description, icon, category, manifest,
+                install_path, wasm_path, web_path, window_mode, window_config,
+                is_enabled, is_installed, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1,
+                (SELECT COALESCE(MAX(sort_order),-1)+1 FROM plugins))",
+        )
+        .bind(&plan.manifest.id)
+        .bind(&plan.manifest.name)
+        .bind(&plan.manifest.version)
+        .bind(&plan.manifest.author)
+        .bind(&plan.manifest.description)
+        .bind(&plan.manifest.icon)
+        .bind(&plan.manifest.category)
+        .bind(&plan.manifest_json)
+        .bind(dest.to_string_lossy().as_ref())
+        .bind(&plan.wasm_path)
+        .bind(&plan.web_path)
+        .bind(&plan.window_mode)
+        .bind(&plan.window_config)
+        .execute(&pool)
+        .await;
+
+        if let Err(e) = inserted {
+            // 入库失败回滚目录，避免残留
+            // Roll back the copied dir on insert failure
+            let _ = std::fs::remove_dir_all(&dest);
+            return Err(format!(
+                "写入 plugins 表失败 / failed to insert into plugins: {e}"
+            ));
+        }
     }
 
     // 重装自愈路径可能替换旧 wasm：清掉编译缓存，确保下次按新文件编译

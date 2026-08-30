@@ -186,7 +186,7 @@ kapi/
 │   │   ├── plugin_bridge.rs             # 统一权限检查 + 桥接分发
 │   │   ├── wasm_runtime.rs              # wasmtime 运行时（见 PLUGINS.md）
 │   │   ├── workflow_engine.rs           # DAG 调度引擎（见 WORKFLOW.md）
-│   │   └── github_client.rs             # 插件市场来源
+│   │   └── store.rs                     # 插件市场（GitHub 源 + 防护提取）
 │   ├── migrations/
 │   │   ├── 001_init.sql
 │   │   └── 002_defaults.sql
@@ -229,7 +229,7 @@ pub fn migrations() -> Vec<Migration> {
 
 ### 3.3 Tauri 命令（v2 API）——已实现
 
-`launch_plugin` / `plugin_install` / `plugin_uninstall` 落地于 `src-tauri/src/plugin_manager.rs`（经 `DbInstances` 共享前端创建的 SQLite 连接池）；安装流程：manifest 校验 → 复制到 `plugins/{id}` → 写表（失败回滚目录）。
+`launch_plugin` / `plugin_install` / `plugin_uninstall` 落地于 `src-tauri/src/plugin_manager.rs`（经 `DbInstances` 共享前端创建的 SQLite 连接池）；安装流程：manifest 校验 → 复制到 `plugins/{id}` → 写表（失败回滚目录）。`store_list` / `store_install` 落地于 `src-tauri/src/store.rs`（GitHub 目录源浏览与安装/更新，见 PLUGINS.md §7）。
 
 ```rust
 // src-tauri/src/plugin_manager.rs（节选）

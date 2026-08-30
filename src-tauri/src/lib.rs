@@ -5,6 +5,7 @@ mod dock;
 mod plugin_bridge;
 mod plugin_manager;
 mod plugin_protocol;
+mod store;
 mod tray;
 mod wasm_runtime;
 
@@ -42,6 +43,8 @@ pub fn run() {
             plugin_manager::plugin_install,
             plugin_manager::plugin_uninstall,
             plugin_manager::launch_plugin,
+            store::store_list,
+            store::store_install,
             tray::tray_set_language
         ])
         // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单；独立插件窗口销毁时清理事件订阅
