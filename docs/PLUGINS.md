@@ -193,7 +193,7 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 
 ## 7. 插件市场（已实现：`src-tauri/src/store.rs`）
 
-- **源格式**：GitHub 仓库**顶层每个目录 = 一个插件**（内含 `manifest.json`）。缺省源 `kapi-plugins/kapi-plugins`，市场页可改（`owner/name`，持久化 `settings.store.repo`）。GitHub API 匿名限流 60 次/时/IP，开发期够用；鉴权与 Release 资产源属后续演进。
+- **源格式**：GitHub 仓库**顶层每个目录 = 一个插件**（内含 `manifest.json`）。缺省源 [`kapi-software/kapi-plugins`](https://github.com/kapi-software/kapi-plugins)（官方示例插件仓库），市场页可改（`owner/name`，持久化 `settings.store.repo`）。GitHub API 匿名限流 60 次/时/IP，开发期够用；鉴权与 Release 资产源属后续演进。
 - **浏览 `store_list(repo)`**：contents API 列顶层目录（≤60），`raw.githubusercontent` 并发拉各 manifest，只取展示字段（id/name/version/author/description/category）；畸形 manifest 跳过不拖垮列表。
 - **安装/更新 `store_install(repo, dir)`**：zipball（≤100 MiB）→ **防护提取**只解压 `<zip 根>/<dir>/` 子树到临时目录 → 复用 `install_from_dir` 校验安装（manifest 校验、entry 存在性、路径安全与本地导入完全一致）→ 清理临时目录。防护：条目数 ≤2000、解压总量 ≤200 MiB、条目名逐段校验（拒绝 `..`/绝对路径/反斜杠/空段）、符号链接条目拒绝。
 - **更新语义**（`allow_update`）：已装同名插件走 `UPDATE`——目录整体替换（先关其独立窗口），元数据/manifest/入口以新版为准，**保留 `is_enabled` 与 `sort_order`**；`window_mode` 保留，新 manifest 不再支持时回退推导默认；wasm 缓存 evict。本地导入（`plugin_install`）遇已装仍拒绝，更新只走市场。

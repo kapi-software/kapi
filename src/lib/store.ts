@@ -16,7 +16,7 @@ export interface StoreEntry {
 
 // 缺省市场源：仓库顶层每个目录 = 一个插件（含 manifest.json）
 // Default store source: every top-level repo dir is one plugin (with manifest.json)
-export const DEFAULT_STORE_REPO = 'kapi-plugins/kapi-plugins'
+export const DEFAULT_STORE_REPO = 'kapi-software/kapi-plugins'
 
 // 读取持久化的市场源（settings.store.repo；缺省 DEFAULT_STORE_REPO）
 // Read the persisted store source (settings.store.repo; defaults to DEFAULT_STORE_REPO)
