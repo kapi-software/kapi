@@ -12,8 +12,6 @@ import {
   type Node,
   type Edge,
   Background,
-  Controls,
-  MiniMap,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Save, Play, Pencil } from "lucide-react";
@@ -28,11 +26,11 @@ import { shortId } from "@/lib/id";
 import type { Workflow, WorkflowGraph, WorkflowNode } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
-import { BindingsEditor } from "@/components/workflow/BindingsEditor";
+import { BindingsDrawer } from "@/components/workflow/BindingsDrawer";
 
 // 默认节点类型注册（用于 React Flow 自定义节点）
 // Default node type registry (for React Flow custom nodes)
-const nodeTypes = { plugin: WorkflowNodeCard };
+const nodeTypes = { plugin: WorkflowNodeCard, transform: WorkflowNodeCard };
 
 // 空 graph：起点
 // Empty graph: starting point for new workflows
@@ -186,6 +184,19 @@ export default function WorkflowEditor() {
     [setNodesTyped],
   );
 
+  // 添加 Transform 节点
+  // Add a Transform node
+  const onDropTransform = useCallback(() => {
+    const newNode: Node = {
+      id: nextNodeId(),
+      type: "transform",
+      position: { x: 250 + Math.random() * 100, y: 200 + Math.random() * 60 },
+      data: { type: "transform", plugin_id: "", action: "", config: { template: '{\n  "output": "{{input}}"}\n' } },
+    };
+    setNodesTyped((ns: Node[]) => [...ns, newNode]);
+    setSelectedNodeId(newNode.id);
+  }, [setNodesTyped]);
+
   // 在画布上连线（React Flow 内置行为）
   // Connect nodes on the canvas (React Flow built-in behavior)
   const onConnect = useCallback(
@@ -329,6 +340,13 @@ export default function WorkflowEditor() {
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <BindingsDrawer
+            graph={graph}
+            nodes={nodes}
+            edges={edges}
+            selectedNodeId={selectedNodeId}
+            onChange={(bindings) => setGraph((prev) => ({ ...prev, bindings }))}
+          />
           <Button variant="outline" onClick={handleSave} disabled={saving}>
             <Save />
             {saving ? t("workflow.saving") : t("workflowEditor.save")}
@@ -347,7 +365,7 @@ export default function WorkflowEditor() {
       <div className="flex min-h-0 flex-1 gap-3">
         {/* 左侧：节点面板 */}
         {/* Left: node palette */}
-        <NodePalette plugins={plugins} onDrop={onDrop} />
+        <NodePalette plugins={plugins} onDrop={onDrop} onDropTransform={onDropTransform} />
 
         {/* 中间：React Flow 画布 */}
         {/* Center: React Flow canvas */}
@@ -368,10 +386,9 @@ export default function WorkflowEditor() {
             nodeTypes={nodeTypes}
             fitView
             fitViewOptions={{ padding: 0.3 }}
+            proOptions={{ hideAttribution: true }}
           >
             <Background />
-            <Controls />
-            <MiniMap />
           </ReactFlow>
         </div>
 
@@ -382,18 +399,6 @@ export default function WorkflowEditor() {
           plugins={plugins}
           onUpdate={updateSelectedNode}
           onDelete={deleteSelectedNode}
-        />
-      </div>
-
-      {/* 底部：数据绑定编辑器（固定高度，不参与 flex-1 拉伸） */}
-      {/* Bottom: data bindings editor (fixed height, no flex-1 stretch) */}
-      <div className="shrink-0">
-        <BindingsEditor
-          graph={graph}
-          nodes={nodes}
-          edges={edges}
-          selectedNodeId={selectedNodeId}
-          onChange={(bindings) => setGraph((prev) => ({ ...prev, bindings }))}
         />
       </div>
     </div>
@@ -452,6 +457,7 @@ function NodeInspector({
   const plugin = plugins.find((p) => p.id === node?.data?.plugin_id);
   const actions = plugin?.manifest?.workflow?.actions ?? [];
   const selectedAction = actions.find((a: { name: string }) => a.name === node?.data?.action);
+  const isTransform = node?.data?.type === "transform";
 
   return (
     <div className="flex w-56 flex-col gap-2 rounded-xl border bg-card p-3">
@@ -472,87 +478,119 @@ function NodeInspector({
             <Input className="h-7 font-mono text-xs" value={node.id} readOnly />
           </div>
 
-          {/* 插件选择 */}
-          {/* Plugin selector */}
-          <div className="space-y-0.5">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("workflowEditor.inspector.plugin")}
-            </Label>
-            <select
-              className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-              value={node.data.plugin_id as string}
-              onChange={(e) => onUpdate({ plugin_id: e.target.value, action: "" })}
-            >
-              <option value="">{t("workflowEditor.inspector.selectPlugin")}</option>
-              {plugins.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isTransform ? (
+            /* Transform 节点：只显示模板编辑器 */
+            <>
+              <div className="rounded bg-blue-100 px-2 py-1 text-[10px] text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                JSON 模板映射（Handlebars 语法）
+              </div>
+              <div className="space-y-0.5">
+                <Label className="text-[10px] text-muted-foreground">
+                  模板（Template）
+                </Label>
+                <textarea
+                  className="h-40 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
+                  value={
+                    (node.data.config as Record<string, unknown>)?.template as string ?? ""
+                  }
+                  onChange={(e) =>
+                    onUpdate({
+                      config: { ...(node.data.config as object), template: e.target.value },
+                    })
+                  }
+                  placeholder='{"output": "{{input}}"}'
+                  spellCheck={false}
+                />
+                <p className="text-[9px] text-muted-foreground">
+                  使用 <code className="font-mono">{"{{path.to.field}}"}</code> 引用上游输出
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* 插件选择 */}
+              {/* Plugin selector */}
+              <div className="space-y-0.5">
+                <Label className="text-[10px] text-muted-foreground">
+                  {t("workflowEditor.inspector.plugin")}
+                </Label>
+                <select
+                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  value={node.data.plugin_id as string}
+                  onChange={(e) => onUpdate({ plugin_id: e.target.value, action: "" })}
+                >
+                  <option value="">{t("workflowEditor.inspector.selectPlugin")}</option>
+                  {plugins.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* 动作选择 */}
-          {/* Action selector */}
-          <div className="space-y-0.5">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("workflowEditor.inspector.action")}
-            </Label>
-            <select
-              className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-              value={node.data.action as string}
-              onChange={(e) => onUpdate({ action: e.target.value })}
-              disabled={!node.data.plugin_id}
-            >
-              <option value="">{t("workflowEditor.inspector.selectAction")}</option>
-              {actions.map((a: { name: string }) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* 动作选择 */}
+              {/* Action selector */}
+              <div className="space-y-0.5">
+                <Label className="text-[10px] text-muted-foreground">
+                  {t("workflowEditor.inspector.action")}
+                </Label>
+                <select
+                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                  value={node.data.action as string}
+                  onChange={(e) => onUpdate({ action: e.target.value })}
+                  disabled={!node.data.plugin_id}
+                >
+                  <option value="">{t("workflowEditor.inspector.selectAction")}</option>
+                  {actions.map((a: { name: string }) => (
+                    <option key={a.name} value={a.name}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* 输入/输出声明 */}
-          {/* Input/output declarations */}
-          {selectedAction && (
-            <div className="space-y-1 rounded bg-muted/50 p-2 text-[10px]">
-              {selectedAction.inputs && Object.keys(selectedAction.inputs).length > 0 && (
-                <div>
-                  <span className="text-muted-foreground">inputs: </span>
-                  <span className="font-mono">{Object.keys(selectedAction.inputs).join(", ")}</span>
+              {/* 输入/输出声明 */}
+              {/* Input/output declarations */}
+              {selectedAction && (
+                <div className="space-y-1 rounded bg-muted/50 p-2 text-[10px]">
+                  {selectedAction.inputs && Object.keys(selectedAction.inputs).length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">inputs: </span>
+                      <span className="font-mono">{Object.keys(selectedAction.inputs).join(", ")}</span>
+                    </div>
+                  )}
+                  {selectedAction.outputs && Object.keys(selectedAction.outputs).length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">outputs: </span>
+                      <span className="font-mono">{Object.keys(selectedAction.outputs).join(", ")}</span>
+                    </div>
+                  )}
+                  {!selectedAction.inputs && !selectedAction.outputs && (
+                    <span className="italic text-muted-foreground">{t("workflowEditor.canvas.noOutputs")}</span>
+                  )}
                 </div>
               )}
-              {selectedAction.outputs && Object.keys(selectedAction.outputs).length > 0 && (
-                <div>
-                  <span className="text-muted-foreground">outputs: </span>
-                  <span className="font-mono">{Object.keys(selectedAction.outputs).join(", ")}</span>
-                </div>
-              )}
-              {!selectedAction.inputs && !selectedAction.outputs && (
-                <span className="italic text-muted-foreground">{t("workflowEditor.canvas.noOutputs")}</span>
-              )}
-            </div>
+
+              {/* 节点配置 JSON */}
+              {/* Node config JSON */}
+              <div className="space-y-0.5">
+                <Label className="text-[10px] text-muted-foreground">
+                  {t("workflowEditor.inspector.config")}
+                </Label>
+                <textarea
+                  className="h-20 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
+                  value={configText}
+                  onChange={(e) => setConfigText(e.target.value)}
+                  onBlur={handleConfigBlur}
+                  placeholder={t("workflowEditor.inspector.configPlaceholder")}
+                  spellCheck={false}
+                />
+                {configError && (
+                  <p className="text-[10px] text-destructive">{configError}</p>
+                )}
+              </div>
+            </>
           )}
-
-          {/* 节点配置 JSON */}
-          {/* Node config JSON */}
-          <div className="space-y-0.5">
-            <Label className="text-[10px] text-muted-foreground">
-              {t("workflowEditor.inspector.config")}
-            </Label>
-            <textarea
-              className="h-20 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
-              value={configText}
-              onChange={(e) => setConfigText(e.target.value)}
-              onBlur={handleConfigBlur}
-              placeholder={t("workflowEditor.inspector.configPlaceholder")}
-              spellCheck={false}
-            />
-            {configError && (
-              <p className="text-[10px] text-destructive">{configError}</p>
-            )}
-          </div>
 
           {/* 删除按钮 */}
           {/* Delete button */}

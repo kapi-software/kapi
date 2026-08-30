@@ -21,6 +21,12 @@ pub fn run() {
         // 目录选择对话框：插件本地导入（plugins 页）
         // Directory picker dialog: local plugin import (plugins page)
         .plugin(tauri_plugin_dialog::init())
+        // 剪贴板：Clipboard 触发器使用
+        // Clipboard: used by Clipboard trigger
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // 全局快捷键：Hotkey 触发器使用
+        // Global shortcut: used by Hotkey trigger
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // SQLite 插件：迁移随插件加载自动执行（唯一入口，见 db.rs）
         // SQLite plugin: migrations run automatically on load (single entry, see db.rs)
         .plugin(
@@ -55,7 +61,10 @@ pub fn run() {
             workflow_engine::workflow_save,
             workflow_engine::workflow_delete,
             workflow_engine::workflow_runs,
-            workflow_engine::workflow_run_steps
+            workflow_engine::workflow_run_steps,
+            workflow_engine::trigger_save,
+            workflow_engine::trigger_delete,
+            workflow_engine::trigger_list
         ])
         // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单；独立插件窗口销毁时清理事件订阅
         // Closing the main window hides it to the tray; a destroyed plugin window purges
@@ -97,6 +106,18 @@ pub fn run() {
                 wasm, // Arc<WasmRuntime>
                 pool_for_engine,
             )));
+            // 启动已持久化的触发器（schedule / plugin_event / clipboard / hotkey）
+            // Start persisted triggers (schedule / plugin_event / clipboard / hotkey)
+            let engine = app
+                .state::<Arc<workflow_engine::WorkflowEngine>>()
+                .inner()
+                .clone();
+            let app_for_triggers = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(_e) = engine.start_triggers(app_for_triggers).await {
+                    eprintln!("failed to start triggers: {_e}");
+                }
+            });
             // Dock 服务：启动定位 + 热区轮询线程（docs/DOCK.md）
             // Dock service: startup positioning + hotzone polling thread (docs/DOCK.md)
             dock::start(app.handle().clone());

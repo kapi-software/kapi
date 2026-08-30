@@ -4,11 +4,16 @@
 // v1: only manual trigger + plugin node type; transform is reserved as a placeholder (skipped)
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
+use handlebars::Handlebars;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 use tauri::{AppHandle, Manager};
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::plugin_bridge::write_system_log;
 use crate::plugin_manager::sqlite_pool;
@@ -60,6 +65,29 @@ pub struct TriggerEntry {
     pub trigger_type: TriggerType,
     pub config: Value,
     pub workflow_id: String,
+}
+
+// 活跃的触发器句柄（取消令牌 + 后台任务）
+// Active trigger handle (cancellation token + background task)
+struct TriggerHandle {
+    cancel: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+// 工作流触发器配置（与前端 type 对齐）
+// Workflow trigger config (mirrors the frontend type)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowTrigger {
+    pub id: String,
+    pub workflow_id: String,
+    pub trigger_type: String,
+    pub config: Value,
+    #[serde(default = "default_true")]
+    pub is_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 // ============================================================
@@ -160,17 +188,27 @@ pub struct WorkflowEngine {
     // SQLite 池（直接持有便于单元测试；Tauri 命令路径经 sqlite_pool(&app) 重建）
     // SQLite pool (held for unit tests; Tauri command path rebuilds via sqlite_pool(&app))
     pool: SqlitePool,
-    // 触发器注册表：trigger_id → TriggerEntry（v1 占位，路由分发留待后续）
-    // Trigger registry: trigger_id → TriggerEntry (v1 placeholder; dispatch later)
-    triggers: tokio::sync::RwLock<HashMap<String, TriggerEntry>>,
+    // 触发器注册表：trigger_id → TriggerEntry（内存缓存）
+    // Trigger registry: trigger_id → TriggerEntry (in-memory cache)
+    triggers: RwLock<HashMap<String, TriggerEntry>>,
+    // 活跃触发器后台任务：cancel 取消令牌 + JoinHandle
+    // Active trigger background tasks: cancellation token + JoinHandle
+    trigger_tasks: RwLock<HashMap<String, TriggerHandle>>,
+    // Handlebars 模板引擎（Arc 包装以便跨 await 共享）
+    // Handlebars template engine (Arc-wrapped for sharing across await)
+    handlebars: Arc<Handlebars<'static>>,
 }
 
 impl WorkflowEngine {
     pub fn new(wasm: Arc<WasmRuntime>, pool: SqlitePool) -> Self {
+        let mut handlebars = Handlebars::new();
+        handlebars.set_strict_mode(true);
         Self {
             wasm,
             pool,
-            triggers: tokio::sync::RwLock::new(HashMap::new()),
+            triggers: RwLock::new(HashMap::new()),
+            trigger_tasks: RwLock::new(HashMap::new()),
+            handlebars: Arc::new(handlebars),
         }
     }
 
@@ -194,6 +232,13 @@ impl WorkflowEngine {
 
     #[allow(dead_code)]
     pub async fn unregister_trigger(&self, trigger_id: &str) {
+        // 停止后台任务
+        let mut tasks = self.trigger_tasks.write().await;
+        if let Some(handle) = tasks.remove(trigger_id) {
+            handle.cancel.cancel();
+            let _ = handle.task.await;
+        }
+        // 移除注册表
         let mut map = self.triggers.write().await;
         map.remove(trigger_id);
     }
@@ -201,6 +246,177 @@ impl WorkflowEngine {
     #[allow(dead_code)]
     pub async fn trigger_count(&self) -> usize {
         self.triggers.read().await.len()
+    }
+
+    // 触发器持久化：从数据库加载所有触发器配置
+    // Load triggers from the database
+    #[allow(dead_code)]
+    pub async fn load_triggers_from_db(&self) -> Result<Vec<WorkflowTrigger>, String> {
+        let rows = sqlx::query("SELECT id, workflow_id, trigger_type, config, is_enabled FROM workflow_triggers WHERE is_enabled = 1")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("StorageError: {e}"))?;
+        let mut triggers = Vec::with_capacity(rows.len());
+        for row in rows {
+            let config_text: String = row.try_get("config").map_err(|e| format!("StorageError: {e}"))?;
+            let config: Value = serde_json::from_str(&config_text).map_err(|e| format!("InvalidConfig: {e}"))?;
+            let is_enabled: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
+            triggers.push(WorkflowTrigger {
+                id: row.try_get("id").map_err(|e| format!("StorageError: {e}"))?,
+                workflow_id: row.try_get("workflow_id").map_err(|e| format!("StorageError: {e}"))?,
+                trigger_type: row.try_get("trigger_type").map_err(|e| format!("StorageError: {e}"))?,
+                config,
+                is_enabled: is_enabled != 0,
+            });
+        }
+        Ok(triggers)
+    }
+
+    // 启动所有已注册的触发器（setup 时调用）
+    // Start all registered triggers (called during setup)
+    #[allow(dead_code)]
+    pub async fn start_triggers(&self, app: AppHandle) -> Result<(), String> {
+        let triggers = self.load_triggers_from_db().await?;
+        for trigger in triggers {
+            self.start_trigger(app.clone(), trigger).await?;
+        }
+        Ok(())
+    }
+
+    // 启动单个触发器（内部方法）
+    // Start a single trigger (internal)
+    async fn start_trigger(&self, app: AppHandle, trigger: WorkflowTrigger) -> Result<(), String> {
+        let trigger_type = TriggerType::from_str(&trigger.trigger_type)
+            .ok_or_else(|| format!("UnknownTriggerType: {}", trigger.trigger_type))?;
+        let entry = TriggerEntry {
+            trigger_type,
+            config: trigger.config.clone(),
+            workflow_id: trigger.workflow_id.clone(),
+        };
+        let trigger_id = trigger.id.clone();
+
+        // 注册到内存表
+        self.register_trigger(trigger_id.clone(), entry.clone()).await;
+
+        // 根据类型启动后台任务
+        let cancel = CancellationToken::new();
+        let _pool = self.pool.clone();
+        let _wasm = self.wasm.clone();
+        let _handlebars = self.handlebars.clone();
+
+        let task = match trigger_type {
+            TriggerType::Schedule => {
+                self.start_schedule_trigger(app.clone(), trigger_id.clone(), entry, cancel.clone()).await
+            }
+            TriggerType::PluginEvent => {
+                self.start_plugin_event_trigger(app.clone(), trigger_id.clone(), entry, cancel.clone()).await
+            }
+            _ => {
+                // Clipboard 和 Hotkey 由 Tauri 插件通过事件驱动，这里只注册内存表
+                // Clipboard and Hotkey are driven by Tauri plugin events; just register the in-memory table
+                return Ok(());
+            }
+        };
+
+        // 保存任务句柄
+        let mut tasks = self.trigger_tasks.write().await;
+        tasks.insert(trigger_id, TriggerHandle { cancel, task });
+        Ok(())
+    }
+
+    // Schedule 触发器：定时执行工作流
+    // Schedule trigger: execute workflow periodically
+    async fn start_schedule_trigger(
+        &self,
+        app: AppHandle,
+        _trigger_id: String,
+        entry: TriggerEntry,
+        cancel: CancellationToken,
+    ) -> JoinHandle<()> {
+        let interval_secs = entry.config.get("interval_seconds")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(60) as u64;
+        let workflow_id = entry.workflow_id.clone();
+        let _pool = self.pool.clone();
+        let _wasm = self.wasm.clone();
+        let _handlebars = self.handlebars.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        // 执行工作流
+                        let engine = match WorkflowEngine::from_app(&app) {
+                            Ok(e) => e,
+                            Err(_) => break,
+                        };
+                        let _ = engine.execute(&workflow_id, TriggerType::Schedule, json!({})).await;
+                    }
+                }
+            }
+        })
+    }
+
+    // Plugin Event 触发器：轮询 plugin_events 表
+    // Plugin Event trigger: poll the plugin_events table
+    async fn start_plugin_event_trigger(
+        &self,
+        app: AppHandle,
+        _trigger_id: String,
+        entry: TriggerEntry,
+        cancel: CancellationToken,
+    ) -> JoinHandle<()> {
+        let event_type = entry.config.get("event_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let workflow_id = entry.workflow_id.clone();
+        let pool = self.pool.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut last_event_id: i64 = 0;
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        // 查询新事件（使用工作流引擎内部 pool）
+                        let rows = match sqlx::query(
+                            "SELECT id, data FROM plugin_events WHERE event_type = ? AND id > ? ORDER BY id LIMIT 1"
+                        )
+                        .bind(&event_type)
+                        .bind(last_event_id)
+                        .fetch_all(&pool)
+                        .await {
+                            Ok(r) => r,
+                            Err(_) => continue,
+                        };
+
+                        for row in rows {
+                            let event_id: i64 = row.try_get("id").unwrap_or(0);
+                            let data_text: Option<String> = row.try_get("data").ok();
+                            let event_data: Value = data_text
+                                .and_then(|s| serde_json::from_str(&s).ok())
+                                .unwrap_or(Value::Null);
+
+                            // 更新 last_event_id
+                            if event_id > last_event_id {
+                                last_event_id = event_id;
+                            }
+
+                            // 执行工作流
+                            let engine = match WorkflowEngine::from_app(&app) {
+                                Ok(e) => e,
+                                Err(_) => continue,
+                            };
+                            let _ = engine.execute(&workflow_id, TriggerType::PluginEvent, event_data).await;
+                        }
+                    }
+                }
+            }
+        })
     }
 
     // ============================================================
@@ -249,6 +465,7 @@ impl WorkflowEngine {
                 };
                 let wasm = self.wasm.clone();
                 let pool = self.pool.clone();
+                let handlebars = self.handlebars.clone();
                 let ctx_outputs = snapshot_outputs(&ctx.outputs);
                 let bindings: Vec<DataBinding> = workflow
                     .graph
@@ -269,6 +486,7 @@ impl WorkflowEngine {
                         trigger_data,
                         &wasm,
                         &pool,
+                        &handlebars,
                     )
                     .await
                 });
@@ -518,27 +736,85 @@ async fn run_node(
     trigger_data: Value,
     wasm: &WasmRuntime,
     pool: &SqlitePool,
+    handlebars: &Arc<Handlebars<'_>>,
 ) -> NodeOutcome {
     let step_id = node.id.clone();
 
-    // transform 节点 v1 跳过（保留类型，便于前端编辑期保存合法 graph）
-    // transform nodes are skipped in v1 (type is reserved so the editor can save valid graphs)
-    if node.node_type != "plugin" {
-        let _ = sqlx::query(
-            "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
-             VALUES (?, ?, ?, ?, 'skipped', ?)",
-        )
-        .bind(run_id)
-        .bind(&step_id)
-        .bind(node.plugin_id.as_deref())
-        .bind(node.action.as_deref())
-        .bind(format!(
-            "TransformNotImplemented: node type '{}' is reserved (v1 only 'plugin' executes)",
-            node.node_type
-        ))
-        .execute(pool)
-        .await;
-        return NodeOutcome::Skipped { node_id: step_id };
+    // ============================================================
+    // Transform 节点：JSON 模板映射
+    // Transform node: JSON template mapping via Handlebars
+    // ============================================================
+    if node.node_type == "transform" {
+        let template = node
+            .config
+            .as_ref()
+            .and_then(|c| c.get("template"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("{}");
+
+        // 拼装输入作为模板上下文
+        let context = assemble_input(&bindings, &prior_outputs, &trigger_data, &node.config);
+
+        // 渲染 Handlebars 模板
+        match handlebars.render_template(template, &context) {
+            Ok(rendered) => {
+                // 解析渲染结果为 JSON
+                match serde_json::from_str::<Value>(&rendered) {
+                    Ok(output) => {
+                        let output_str = serde_json::to_string(&output).unwrap_or_else(|_| "null".into());
+                        let _ = sqlx::query(
+                            "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, output)
+                             VALUES (?, ?, ?, ?, 'success', ?)",
+                        )
+                        .bind(run_id)
+                        .bind(&step_id)
+                        .bind(node.plugin_id.as_deref())
+                        .bind(node.action.as_deref())
+                        .bind(&output_str)
+                        .execute(pool)
+                        .await;
+                        return NodeOutcome::Success {
+                            node_id: step_id,
+                            output,
+                        };
+                    }
+                    Err(e) => {
+                        let _ = sqlx::query(
+                            "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
+                             VALUES (?, ?, ?, ?, 'failed', ?)",
+                        )
+                        .bind(run_id)
+                        .bind(&step_id)
+                        .bind(node.plugin_id.as_deref())
+                        .bind(node.action.as_deref())
+                        .bind(format!("TemplateRenderError: {e}"))
+                        .execute(pool)
+                        .await;
+                        return NodeOutcome::Failure {
+                            node_id: step_id,
+                            error: format!("TransformError: template output is not valid JSON: {e}"),
+                        };
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = sqlx::query(
+                    "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
+                     VALUES (?, ?, ?, ?, 'failed', ?)",
+                )
+                .bind(run_id)
+                .bind(&step_id)
+                .bind(node.plugin_id.as_deref())
+                .bind(node.action.as_deref())
+                .bind(format!("HandlebarsError: {e}"))
+                .execute(pool)
+                .await;
+                return NodeOutcome::Failure {
+                    node_id: step_id,
+                    error: format!("TransformError: {e}"),
+                };
+            }
+        }
     }
 
     let plugin_id = match &node.plugin_id {
@@ -967,6 +1243,121 @@ pub async fn workflow_run_steps(
         });
     }
     Ok(out)
+}
+
+// ============================================================
+// 工作流触发器 CRUD
+// Workflow trigger CRUD
+// ============================================================
+
+#[tauri::command]
+pub async fn trigger_save(app: AppHandle, trigger: WorkflowTrigger) -> Result<(), String> {
+    let pool = sqlite_pool(&app).await?;
+    let config_json = serde_json::to_string(&trigger.config)
+        .map_err(|e| format!("InvalidConfig: {e}"))?;
+    sqlx::query(
+        "INSERT INTO workflow_triggers (id, workflow_id, trigger_type, config, is_enabled, updated_at)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(id) DO UPDATE SET
+           workflow_id = excluded.workflow_id,
+           trigger_type = excluded.trigger_type,
+           config = excluded.config,
+           is_enabled = excluded.is_enabled,
+           updated_at = CURRENT_TIMESTAMP",
+    )
+    .bind(&trigger.id)
+    .bind(&trigger.workflow_id)
+    .bind(&trigger.trigger_type)
+    .bind(&config_json)
+    .bind(if trigger.is_enabled { 1 } else { 0 })
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("StorageError: {e}"))?;
+
+    // 如果启用，启动触发器；否则停止
+    let engine = WorkflowEngine::from_app(&app)?;
+    if trigger.is_enabled {
+        engine.reload_trigger(trigger.id.clone()).await?;
+    } else {
+        engine.unregister_trigger(&trigger.id).await;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn trigger_delete(app: AppHandle, trigger_id: String) -> Result<(), String> {
+    let pool = sqlite_pool(&app).await?;
+    // 停止后台任务
+    let engine = WorkflowEngine::from_app(&app)?;
+    engine.unregister_trigger(&trigger_id).await;
+    // 从数据库删除
+    sqlx::query("DELETE FROM workflow_triggers WHERE id = ?")
+        .bind(&trigger_id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("StorageError: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn trigger_list(app: AppHandle, workflow_id: Option<String>) -> Result<Vec<WorkflowTrigger>, String> {
+    let pool = sqlite_pool(&app).await?;
+    let rows = if let Some(wid) = workflow_id {
+        sqlx::query("SELECT id, workflow_id, trigger_type, config, is_enabled FROM workflow_triggers WHERE workflow_id = ?")
+            .bind(&wid)
+            .fetch_all(&pool)
+            .await
+    } else {
+        sqlx::query("SELECT id, workflow_id, trigger_type, config, is_enabled FROM workflow_triggers")
+            .fetch_all(&pool)
+            .await
+    }
+    .map_err(|e| format!("StorageError: {e}"))?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let config_text: String = row.try_get("config").map_err(|e| format!("StorageError: {e}"))?;
+        let config: Value = serde_json::from_str(&config_text).map_err(|e| format!("InvalidConfig: {e}"))?;
+        let is_enabled: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
+        out.push(WorkflowTrigger {
+            id: row.try_get("id").map_err(|e| format!("StorageError: {e}"))?,
+            workflow_id: row.try_get("workflow_id").map_err(|e| format!("StorageError: {e}"))?,
+            trigger_type: row.try_get("trigger_type").map_err(|e| format!("StorageError: {e}"))?,
+            config,
+            is_enabled: is_enabled != 0,
+        });
+    }
+    Ok(out)
+}
+
+// 重新加载单个触发器（保存时调用）
+impl WorkflowEngine {
+    #[allow(dead_code)]
+    pub async fn reload_trigger(&self, trigger_id: String) -> Result<(), String> {
+        self.unregister_trigger(&trigger_id).await;
+        let row = sqlx::query(
+            "SELECT id, workflow_id, trigger_type, config, is_enabled FROM workflow_triggers WHERE id = ? AND is_enabled = 1"
+        )
+        .bind(&trigger_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("StorageError: {e}"))?;
+
+        if let Some(row) = row {
+            let config_text: String = row.try_get("config").map_err(|e| format!("StorageError: {e}"))?;
+            let config: Value = serde_json::from_str(&config_text).map_err(|e| format!("InvalidConfig: {e}"))?;
+            let trigger_type = TriggerType::from_str(&row.try_get::<String, _>("trigger_type").map_err(|e| format!("StorageError: {e}"))?)
+                .ok_or_else(|| "UnknownTriggerType".to_string())?;
+            let entry = TriggerEntry {
+                trigger_type,
+                config,
+                workflow_id: row.try_get("workflow_id").map_err(|e| format!("StorageError: {e}"))?,
+            };
+            self.register_trigger(trigger_id, entry).await;
+        }
+        Ok(())
+    }
 }
 
 // ============================================================

@@ -137,6 +137,41 @@ export interface DataBinding {
 // Trigger type
 export type TriggerType = 'clipboard' | 'hotkey' | 'schedule' | 'manual' | 'plugin_event'
 
+// 工作流触发器配置
+// Workflow trigger configuration
+export interface ScheduleTriggerConfig {
+  interval_seconds: number  // 间隔秒数
+}
+
+export interface PluginEventTriggerConfig {
+  event_type: string  // 监听的事件类型
+}
+
+export interface ClipboardTriggerConfig {
+  // 留空：只要剪贴板变化就触发
+  pattern?: string  // 可选：内容匹配正则
+}
+
+export interface HotkeyTriggerConfig {
+  shortcut: string  // 快捷键字符串，如 "CmdOrCtrl+Shift+K"
+}
+
+export type TriggerConfig =
+  | ScheduleTriggerConfig
+  | PluginEventTriggerConfig
+  | ClipboardTriggerConfig
+  | HotkeyTriggerConfig
+
+// 触发器（数据库表行）
+// Trigger (DB row)
+export interface WorkflowTrigger {
+  id: string
+  workflow_id: string
+  trigger_type: TriggerType
+  config: TriggerConfig
+  is_enabled: boolean
+}
+
 // 工作流（解析后，graph 已为对象）
 // Workflow (parsed, graph is an object)
 export interface Workflow {

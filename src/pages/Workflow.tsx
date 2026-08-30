@@ -17,6 +17,8 @@ import type { Workflow, WorkflowRun } from "@/types";
 import { NewWorkflowDialog } from "@/components/workflow/NewWorkflowDialog";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { CardDetailDialog } from "@/components/common/CardDetailDialog";
+import { TriggerDialog } from "@/components/workflow/TriggerDialog";
+import { TriggerListPanel } from "@/components/workflow/TriggerListPanel";
 
 // 运行状态 → i18n key 映射
 function statusKey(s: string): string {
@@ -43,6 +45,7 @@ function WorkflowCard({
   onHistory,
   onDelete,
   onToggle,
+  onTriggerEdit,
   busy,
 }: {
   workflow: Workflow;
@@ -52,6 +55,7 @@ function WorkflowCard({
   onHistory: (w: Workflow) => void;
   onDelete: (w: Workflow) => void;
   onToggle: (w: Workflow, enabled: boolean) => void;
+  onTriggerEdit: (w: Workflow) => void;
   busy: boolean;
 }) {
   const { t } = useTranslation();
@@ -108,6 +112,12 @@ function WorkflowCard({
             {t("workflow.nodes")}: {nodeCount} · {t("workflow.edges")}: {edgeCount} ·{" "}
             {t("workflow.bindings")}: {bindingCount}
           </p>
+        </div>
+
+        {/* 触发器面板 */}
+        {/* Triggers panel */}
+        <div className="rounded-md border border-dashed bg-muted/30 p-2">
+          <TriggerListPanel workflowId={workflow.id} onEdit={() => onTriggerEdit(workflow)} />
         </div>
 
         {/* 底部：启停 Switch + 全部操作按钮（运行/历史/编辑/删除） */}
@@ -215,6 +225,11 @@ export default function Workflow() {
   const [newOpen, setNewOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Workflow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // 触发器 Dialog 状态
+  // Trigger dialog state
+  const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
+  const [triggerTarget, setTriggerTarget] = useState<Workflow | null>(null);
+  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -304,6 +319,11 @@ export default function Workflow() {
 
   const handleEdit = (w: Workflow) => navigate(`/workflow/${w.id}/edit`);
   const handleHistory = (w: Workflow) => navigate(`/workflow/${w.id}/runs`);
+  const handleTriggerEdit = (w: Workflow) => {
+    setTriggerTarget(w);
+    setEditingTriggerId(null);
+    setTriggerDialogOpen(true);
+  };
 
   if (!isTauri()) {
     return (
@@ -348,6 +368,7 @@ export default function Workflow() {
               onHistory={handleHistory}
               onDelete={handleDelete}
               onToggle={handleToggle}
+              onTriggerEdit={handleTriggerEdit}
               busy={busyId === w.id}
             />
           ))}
@@ -355,6 +376,15 @@ export default function Workflow() {
       )}
 
       <NewWorkflowDialog open={newOpen} onOpenChange={setNewOpen} />
+
+      {triggerTarget && (
+        <TriggerDialog
+          open={triggerDialogOpen}
+          onOpenChange={setTriggerDialogOpen}
+          workflowId={triggerTarget.id}
+          trigger={editingTriggerId ? null : null}
+        />
+      )}
 
       <ConfirmDialog
         open={!!pendingDelete}

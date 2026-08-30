@@ -58,8 +58,8 @@ export function BindingsEditor({ graph, nodes, selectedNodeId, onChange }: Props
   }
 
   return (
-    <div className="rounded-xl border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
         <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           {t('workflowEditor.bindings.title')}
         </div>
@@ -69,7 +69,7 @@ export function BindingsEditor({ graph, nodes, selectedNodeId, onChange }: Props
         </Button>
       </div>
 
-      <p className="mb-2 text-[10px] text-muted-foreground/70">
+      <p className="text-[10px] text-muted-foreground/70">
         {focusNodeId
           ? `${t('workflowEditor.bindings.to')}: ${focusNodeId} · ${actionOf(focusNodeId)}`
           : t('workflowEditor.bindings.hint')}

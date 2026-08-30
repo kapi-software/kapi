@@ -1,9 +1,8 @@
-// 工作流编辑器左侧节点面板：按插件列出可用的 workflow.actions，点击/拖入创建节点
-// Left-side node palette: lists available workflow.actions per plugin,
-// click or drop on the canvas to add a node
+// 工作流编辑器左侧节点面板：按插件列出可用的 workflow.actions + Transform 节点
+// Left-side node palette: lists available workflow.actions per plugin + Transform node
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { Plus, FileJson } from "lucide-react";
 import type { Plugin } from "@/types";
 
 // 聚合插件动作：把 plugin.manifest.workflow?.actions 平铺成可拖入项
@@ -12,6 +11,19 @@ export interface PaletteItem {
   pluginId: string
   pluginName: string
   actionName: string
+  kind?: "plugin" | "transform"
+}
+
+// 简化插件 ID 显示：去掉 kapi-plugin- 前缀
+// Strip kapi-plugin- prefix from plugin id for display
+function shortPluginId(id: string): string {
+  return id.replace(/^kapi-plugin-/, "")
+}
+
+// 显示用插件名：优先用 manifest.name，否则用短化 ID
+// Display name: prefer manifest.name, fallback to short id
+function displayPluginName(id: string, name: string): string {
+  return name && name.length > 0 ? name : shortPluginId(id)
 }
 
 export function buildPalette(plugins: Plugin[]): PaletteItem[] {
@@ -21,8 +33,9 @@ export function buildPalette(plugins: Plugin[]): PaletteItem[] {
     for (const a of actions) {
       items.push({
         pluginId: p.id,
-        pluginName: p.name,
+        pluginName: displayPluginName(p.id, p.name),
         actionName: a.name,
+        kind: "plugin",
       })
     }
   }
@@ -32,9 +45,11 @@ export function buildPalette(plugins: Plugin[]): PaletteItem[] {
 export function NodePalette({
   plugins,
   onDrop,
+  onDropTransform,
 }: {
   plugins: Plugin[]
   onDrop: (pluginId: string, actionName: string) => void
+  onDropTransform?: () => void
 }) {
   const { t } = useTranslation()
   const items = useMemo(() => buildPalette(plugins), [plugins])
@@ -59,6 +74,30 @@ export function NodePalette({
       <p className="text-[10px] text-muted-foreground/70">
         {t('workflowEditor.palette.dropHint')}
       </p>
+
+      {/* Transform 节点 - 始终显示 */}
+      {/* Transform node - always shown */}
+      {onDropTransform && (
+        <div className="space-y-1">
+          <div className="truncate text-[10px] font-medium text-foreground/80">Transform</div>
+          <button
+            className="flex w-full items-center gap-2 rounded border border-dashed border-blue-400 bg-blue-50 px-2 py-1 text-left text-xs transition-colors hover:bg-blue-100 dark:bg-blue-950 dark:hover:bg-blue-900"
+            onClick={onDropTransform}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(
+                'application/x-kapi-node',
+                JSON.stringify({ kind: 'transform' }),
+              )
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            title="Transform - JSON 模板映射"
+          >
+            <FileJson className="h-3 w-3 text-blue-500" />
+            <span className="font-mono text-blue-700 dark:text-blue-300">数据转换</span>
+          </button>
+        </div>
+      )}
 
       {grouped.length === 0 ? (
         <p className="mt-4 text-xs text-muted-foreground">
