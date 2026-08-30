@@ -3,6 +3,7 @@
 // 桥接链路：postMessage → createPluginBridgeHandler → invoke('plugin_bridge')（docs/PANEL.md §3）
 // Bridge: postMessage → createPluginBridgeHandler → invoke('plugin_bridge') (docs/PANEL.md §3)
 import { useEffect, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { cn } from "@/lib/utils";
 import { pluginAssetUrl } from "@/lib/plugin-url";
 import { createPluginBridgeHandler } from "@/lib/plugin-bridge";
@@ -36,6 +37,32 @@ export function PluginHost({
     });
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
+  }, [pluginId]);
+
+  // 宿主推送转发：Rust 定向发来 plugin:event（本插件订阅的事件）→ postMessage 进 iframe，
+  // 由 SDK（kapi.events.on）分发给插件回调
+  // Host push relay: Rust targets this window with plugin:event for the plugin's own
+  // subscriptions -> postMessage into the iframe, where the SDK dispatches to callbacks
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen<{ pluginId: string; type: string; data: unknown; source: string }>(
+      "plugin:event",
+      (e) => {
+        if (e.payload?.pluginId !== pluginId) return;
+        frameRef.current?.contentWindow?.postMessage(
+          {
+            kapiEvent: true,
+            type: e.payload.type,
+            data: e.payload.data ?? null,
+            source: e.payload.source,
+          },
+          "*"
+        );
+      }
+    );
+    return () => {
+      un.then((f) => f());
+    };
   }, [pluginId]);
 
   return (

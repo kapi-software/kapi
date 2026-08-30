@@ -103,6 +103,14 @@ struct EventsEmitPayload {
     data: Option<Value>,
 }
 
+// events.on / events.off 载荷：off 的 type 缺省 = 退订全部
+// events.on / events.off payload: a missing type on off means "unsubscribe all"
+#[derive(Deserialize)]
+struct EventsOnPayload {
+    #[serde(rename = "type")]
+    event_type: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct LogPayload {
     message: String,
@@ -415,8 +423,9 @@ async fn storage_remove(pool: &sqlx::SqlitePool, plugin_id: &str, payload: Value
     Ok(Value::Null)
 }
 
-// events.emit：写入事件总线历史（工作流触发器与审计的数据源）
-// events.emit: append to the event-bus history (source for workflow triggers and auditing)
+// events.emit：写入事件总线历史（工作流触发器与审计的数据源），再扇出给订阅者
+// events.emit: append to the event-bus history (source for workflow triggers and
+// auditing), then fan out to subscribers
 async fn events_emit(pool: &sqlx::SqlitePool, plugin_id: &str, payload: Value) -> Result<Value, String> {
     let p: EventsEmitPayload = parse_payload(payload)?;
     validate_event_type(&p.event_type)?;
@@ -431,7 +440,113 @@ async fn events_emit(pool: &sqlx::SqlitePool, plugin_id: &str, payload: Value) -
         .execute(pool)
         .await
         .map_err(|e| format!("EventError: {e}"))?;
+
+    // 扇出不阻断发射（推送失败只写宿主日志）；data 已序列化为字符串，扇出侧直接复用
+    // Fan-out never fails the emit (push failures only log); reuse the serialized data
+    let data_value = data
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .unwrap_or(Value::Null);
+    event_fanout(&p.event_type, plugin_id, &data_value);
     Ok(Value::Null)
+}
+
+// ---- 事件推送总线 / event push bus ----
+
+// 订阅表 + 宿主句柄：全局单例（dispatch 无 AppHandle 也能扇出；setup 注入句柄）
+// Subscription table + host handle: a global singleton (dispatch fans out without an
+// AppHandle of its own; the handle is injected at setup)
+#[derive(Default)]
+struct EventBus {
+    // (宿主窗口 label, 插件 id) → 订阅的事件类型集合
+    // (host window label, plugin id) -> subscribed event types
+    subs: std::sync::Mutex<HashMap<(String, String), HashSet<String>>>,
+    app: std::sync::OnceLock<AppHandle>,
+}
+
+static EVENT_BUS: std::sync::OnceLock<EventBus> = std::sync::OnceLock::new();
+
+fn event_bus() -> &'static EventBus {
+    EVENT_BUS.get_or_init(EventBus::default)
+}
+
+// setup 注入宿主句柄；未注入时注册照常生效、推送静默跳过（单测无需真实应用）
+// Inject the host handle at setup; without it registration works but pushes are
+// skipped (unit tests need no real app)
+pub fn init_event_bus(app: AppHandle) {
+    let _ = event_bus().app.set(app);
+}
+
+// 订阅：UI 桥命令路径调用（label = 调用方宿主窗口）
+// Subscribe: called on the UI bridge path (label = the caller's host window)
+fn event_subscribe(label: &str, plugin_id: &str, event_type: &str) {
+    event_bus()
+        .subs
+        .lock()
+        .expect("event bus poisoned")
+        .entry((label.to_string(), plugin_id.to_string()))
+        .or_default()
+        .insert(event_type.to_string());
+}
+
+// 退订：type 为 None 时清除该 (label, plugin) 的全部订阅
+// Unsubscribe: a None type clears every subscription of that (label, plugin)
+fn event_unsubscribe(label: &str, plugin_id: &str, event_type: Option<&str>) {
+    let mut subs = event_bus().subs.lock().expect("event bus poisoned");
+    match event_type {
+        Some(t) => {
+            if let Some(types) = subs.get_mut(&(label.to_string(), plugin_id.to_string())) {
+                types.remove(t);
+                if types.is_empty() {
+                    subs.remove(&(label.to_string(), plugin_id.to_string()));
+                }
+            }
+        }
+        None => {
+            subs.remove(&(label.to_string(), plugin_id.to_string()));
+        }
+    }
+}
+
+// 窗口销毁清理：独立插件窗口关闭后注册表不残留
+// Window-destroy cleanup: no stale entries after an independent plugin window closes
+pub fn event_purge_window(label: &str) {
+    event_bus()
+        .subs
+        .lock()
+        .expect("event bus poisoned")
+        .retain(|(l, _), _| l != label);
+}
+
+// 扇出：对每个订阅该类型的 (宿主窗口, 插件) 定向 emit plugin:event；
+// PluginHost 按 pluginId 过滤后 postMessage 转发进自家 iframe
+// Fan-out: emit plugin:event to every (host window, plugin) subscribed to the type;
+// PluginHost filters by pluginId and forwards into its own iframe via postMessage
+fn event_fanout(event_type: &str, source: &str, data: &Value) {
+    let Some(app) = event_bus().app.get() else {
+        return;
+    };
+    // 先快照订阅者再放锁：推送（IPC）不进临界区
+    // Snapshot the recipients, then drop the lock: pushes (IPC) stay out of the critical section
+    let targets: Vec<(String, String)> = {
+        let subs = event_bus().subs.lock().expect("event bus poisoned");
+        subs.iter()
+            .filter(|(_, types)| types.contains(event_type))
+            .map(|((label, plugin_id), _)| (label.clone(), plugin_id.clone()))
+            .collect()
+    };
+    for (label, plugin_id) in targets {
+        let payload = json!({
+            "pluginId": plugin_id,
+            "type": event_type,
+            "data": data,
+            "source": source,
+        });
+        // 推送失败不影响其余订阅者 / one failed push never blocks the others
+        if let Err(e) = app.emit_to(label.as_str(), "plugin:event", payload) {
+            eprintln!("kapi: event push to '{label}' failed: {e}");
+        }
+    }
 }
 
 // 写 system_logs 的公共入口（plugin_log / headless 启动 / WASM stderr 摘录共用）
@@ -549,9 +664,11 @@ pub(crate) async fn dispatch_channel(
         // 禁止 WASM 内嵌套调用自己的 wasm 入口
         // Nested self-invocation from WASM is forbidden
         "kapi:plugin.invoke" => Err("WasmError: kapi:plugin.invoke is not callable from WASM".into()),
-        // 事件订阅需要 SDK 侧的推送协议，与 @kapi/plugin-sdk 同轮落地
-        // Subscription needs the SDK-side push protocol; lands with @kapi/plugin-sdk
-        "kapi:events.on" => Err("NotImplemented: event subscription lands with the plugin SDK".into()),
+        // 事件订阅属 UI 专属（推送目标是调用方宿主窗口，WASM 没有窗口）
+        // Event subscription is UI-only (the push target is the caller's host window)
+        "kapi:events.on" | "kapi:events.off" => {
+            Err("EventError: event subscription is UI-only (no push target from WASM)".into())
+        }
         other => Err(format!("UnknownChannel: {other}")),
     }
 }
@@ -609,6 +726,29 @@ pub async fn plugin_bridge(
         "kapi:window.startDragging" => {
             ensure_own_window(&window, &plugin_id)?;
             window.start_dragging().map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        // 事件订阅（UI 专属）：注册推送注册表，扇出由 events.emit 触发
+        // Event subscription (UI-only): register for pushes; events.emit triggers the fan-out
+        "kapi:events.on" => {
+            let p: EventsOnPayload = parse_payload(payload)?;
+            let event_type = p.event_type.ok_or_else(|| {
+                "InvalidPayload: event subscription requires a type".to_string()
+            })?;
+            validate_event_type(&event_type)?;
+            ctx.guard.require("events:subscribe")?;
+            event_subscribe(window.label(), &plugin_id, &event_type);
+            Ok(Value::Null)
+        }
+        // 退订：type 缺省清除该 (宿主窗口, 插件) 的全部订阅
+        // Unsubscribe: a missing type clears every subscription of that (host, plugin)
+        "kapi:events.off" => {
+            let p: EventsOnPayload = parse_payload(payload)?;
+            if let Some(event_type) = &p.event_type {
+                validate_event_type(event_type)?;
+            }
+            ctx.guard.require("events:subscribe")?;
+            event_unsubscribe(window.label(), &plugin_id, p.event_type.as_deref());
             Ok(Value::Null)
         }
         // 调用自身 WASM 入口（无需权限声明）：payload {action, payload?}
@@ -712,6 +852,46 @@ mod tests {
         ] {
             assert_eq!(channel_permission(ch), None);
         }
+    }
+
+    // ---- 事件推送总线 / event push bus ----
+    // 全局单例：本组测试独占使用（cargo 并行下其它测试不触碰 EVENT_BUS）
+    // Global singleton: owned by this group (no other test touches EVENT_BUS in parallel)
+
+    #[test]
+    fn event_bus_tracks_subscriptions_and_purges() {
+        event_subscribe("main", "com.a", "tick");
+        event_subscribe("main", "com.a", "tock");
+        event_subscribe("plugin-com_b", "com.b", "tick");
+
+        // 快照断言辅助：读 (label, plugin) 当前订阅集合
+        // Snapshot helper: the current subscription set of a (label, plugin)
+        let types_of = |label: &str, plugin: &str| -> Option<Vec<String>> {
+            let subs = event_bus().subs.lock().unwrap();
+            subs.get(&(label.to_string(), plugin.to_string()))
+                .map(|s| s.iter().cloned().collect())
+        };
+        let mut a = types_of("main", "com.a").unwrap();
+        a.sort();
+        assert_eq!(a, vec!["tick".to_string(), "tock".to_string()]);
+
+        // 退订单个类型；集合清空后条目移除
+        // Unsubscribe one type; an emptied set removes the entry
+        event_unsubscribe("main", "com.a", Some("tick"));
+        assert_eq!(types_of("main", "com.a"), Some(vec!["tock".to_string()]));
+        event_unsubscribe("main", "com.a", Some("tock"));
+        assert_eq!(types_of("main", "com.a"), None);
+
+        // 窗口销毁清理：整 label 移除（未登记的 label 无害）
+        // Window purge: the whole label goes; unknown labels are harmless
+        event_purge_window("plugin-com_b");
+        assert_eq!(types_of("plugin-com_b", "com.b"), None);
+        event_purge_window("no-such-window");
+
+        // 退订全部（type 缺省）/ unsubscribe all (missing type)
+        event_subscribe("main", "com.a", "tick");
+        event_unsubscribe("main", "com.a", None);
+        assert_eq!(types_of("main", "com.a"), None);
     }
 
     // ---- payload 校验 / payload validation ----

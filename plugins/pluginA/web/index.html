@@ -36,45 +36,40 @@
         cursor: pointer;
       }
       .count { margin-top: 16px; font-size: 28px; font-weight: 700; }
+      .event {
+        margin-top: 14px;
+        font-size: 11px;
+        opacity: 0.75;
+        min-height: 1.2em;
+        word-break: break-all;
+      }
+      #note { margin-top: 6px; font-size: 11px; opacity: 0.75; min-height: 1em; }
     </style>
+    <!-- @kapi/plugin-sdk：宿主保留路径分发（kapi-plugin:///__kapi__/sdk.js） -->
+    <!-- @kapi/plugin-sdk: served from the host's reserved path -->
+    <script src="/__kapi__/sdk.js"></script>
   </head>
   <body>
     <div class="card">
       <h1>示例插件 A</h1>
-      <p>Sample Plugin A · 经 kapi-plugin:// 协议加载 / served via kapi-plugin://</p>
+      <p>Sample Plugin A · @kapi/plugin-sdk 桥接 / bridged via @kapi/plugin-sdk</p>
       <button id="inc">点我 +1 / Click me</button>
       <div class="count" id="count">0</div>
-      <p id="note" style="min-height: 1em; font-size: 11px; opacity: 0.75"></p>
+      <div class="event" id="event"></div>
+      <p id="note"></p>
     </div>
     <script>
-      // 裸桥接 RPC：@kapi/plugin-sdk 接入后由 SDK 替换（当前刻意内联，双样例共用同款写法）
-      // Raw bridge RPC: replaced by @kapi/plugin-sdk later (deliberately inline for now)
-      // 协议见 docs/PANEL.md §3：请求 {id, channel, payload}；响应 {id, ok, data} | {id, ok, error}
-      // Protocol per docs/PANEL.md §3: request {id, channel, payload}; response {id, ok, data|error}
-      let seq = 0;
-      const pending = new Map();
-      function call(channel, payload) {
-        return new Promise((resolve, reject) => {
-          const id = ++seq;
-          pending.set(id, { resolve, reject });
-          parent.postMessage({ id, channel, payload }, "*");
-        });
-      }
-      window.addEventListener("message", (e) => {
-        const msg = e.data;
-        if (!msg || typeof msg !== "object" || !pending.has(msg.id)) return;
-        const { resolve, reject } = pending.get(msg.id);
-        pending.delete(msg.id);
-        msg.ok ? resolve(msg.data) : reject(new Error(msg.error || "bridge error"));
-      });
-
+      // SDK 用法示范：storage 持久化 + 事件回环（emit → 宿主扇出 → SDK 分发）
+      // SDK usage demo: storage persistence + an event round-trip
       let n = 0;
       const countEl = document.getElementById("count");
+      const eventEl = document.getElementById("event");
       const noteEl = document.getElementById("note");
 
       // 启动恢复持久化计数（manifest 已声明 storage:read/write）
       // Restore the persisted counter on load (manifest declares storage:read/write)
-      call("kapi:storage.get", { key: "counter" })
+      kapi.storage
+        .get("counter")
         .then((res) => {
           if (res && typeof res.value === "number") {
             n = Math.floor(res.value);
@@ -88,12 +83,25 @@
           noteEl.textContent = "存储不可用，仅内存计数 / storage unavailable, in-memory only";
         });
 
+      // 订阅自身事件：验证 emit → Rust 扇出 → PluginHost 转发 → SDK 分发的完整链路
+      // Subscribe to our own event: verifies emit -> Rust fan-out -> PluginHost relay
+      // -> SDK dispatch end to end
+      kapi.events
+        .on("counter.changed", (ev) => {
+          eventEl.textContent =
+            "on(counter.changed) · data=" + JSON.stringify(ev.data) + " · source=" + ev.source;
+        })
+        .catch((err) => {
+          eventEl.textContent = "事件订阅失败 / subscribe failed: " + err.message;
+        });
+
       document.getElementById("inc").addEventListener("click", () => {
         n += 1;
         countEl.textContent = String(n);
-        // 持久化失败不阻断交互（降级为内存计数）
-        // A failed persist never blocks the interaction (in-memory fallback)
-        call("kapi:storage.set", { key: "counter", value: n }).catch(() => {});
+        // 持久化 + 广播（manifest 已声明 storage:write / events:emit）
+        // Persist and broadcast (manifest declares storage:write / events:emit)
+        kapi.storage.set("counter", n).catch(() => {});
+        kapi.events.emit("counter.changed", { count: n }).catch(() => {});
       });
     </script>
   </body>

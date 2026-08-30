@@ -44,17 +44,27 @@ pub fn run() {
             plugin_manager::launch_plugin,
             tray::tray_set_language
         ])
-        // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单
-        // Closing the main window hides it to the tray; quit lives in the tray menu only
+        // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单；独立插件窗口销毁时清理事件订阅
+        // Closing the main window hides it to the tray; a destroyed plugin window purges
+        // its event subscriptions
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() == "main" {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
+                tauri::WindowEvent::Destroyed => {
+                    plugin_bridge::event_purge_window(window.label());
+                }
+                _ => {}
             }
         })
         .setup(|app| {
+            // 事件推送总线：注入宿主句柄（events.emit 扇出用）
+            // Event push bus: inject the host handle (used by the events.emit fan-out)
+            plugin_bridge::init_event_bus(app.handle().clone());
             // Dock 服务：启动定位 + 热区轮询线程（docs/DOCK.md）
             // Dock service: startup positioning + hotzone polling thread (docs/DOCK.md)
             dock::start(app.handle().clone());

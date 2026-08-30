@@ -95,6 +95,7 @@ export function PluginHost({ pluginId }: { pluginId: string }) {
 协议细节（`src/lib/plugin-bridge.ts`，纯函数可单测）：
 
 - 请求 `{ id, channel, payload }`，`channel` 必须以 `kapi:` 开头；响应 `{ id, ok: true, data }` | `{ id, ok: false, error }`。
+- **宿主→插件推送**：`{ kapiEvent: true, type, data, source }`（事件订阅扇出，链路见 PLUGINS.md §4）；与 RPC 响应以 `kapiEvent` 标记区分。
 - **只信任自家 iframe**（`e.source === contentWindow`）；来源不匹配或畸形请求**静默丢弃**（不回发，避免回声回路）。
 - sandbox 无 `allow-same-origin` → iframe 为 opaque origin（`e.origin === "null"`），回发 targetOrigin 用 `'*'`（目标已过 source 校验，内容仅为该插件自身请求的结果）。
 - 独立窗口壳（`PluginWindowShell`）在 `window_config.transparent` 时以加载门控 + 内联样式保证首帧即透明（html/body 双透明，见 PLUGINS.md §2.2）。

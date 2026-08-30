@@ -199,6 +199,14 @@ pub fn plan_install(
             manifest.id
         ));
     }
+    // __ 前缀保留给宿主共享资源（kapi-plugin:///__kapi__/sdk.js），插件不得占用
+    // The __ prefix is reserved for host-shared assets (kapi-plugin:///__kapi__/sdk.js)
+    if manifest.id.starts_with("__") {
+        return Err(format!(
+            "插件 id 保留（__ 前缀属宿主）/ reserved plugin id: {}",
+            manifest.id
+        ));
+    }
     if manifest.name.trim().is_empty() {
         return Err("manifest 缺少 name / manifest is missing name".into());
     }
@@ -265,7 +273,7 @@ pub fn plan_install(
         None => manifest
             .window
             .as_ref()
-            .map(|w| serde_json::to_string(w))
+            .map(serde_json::to_string)
             .transpose()
             .map_err(|e| e.to_string())?,
     };
@@ -363,6 +371,27 @@ fn row_to_plugin(row: &sqlx::sqlite::SqliteRow) -> Result<Value, String> {
     let manifest: Value = serde_json::from_str(&s("manifest")?).unwrap_or(Value::Null);
     let window_config: Option<Value> = opt_s("window_config")?.and_then(|j| serde_json::from_str(&j).ok());
 
+    // 声明形态随行下发（前端模式下拉只渲染可选项；解析失败回退空集，启动裁决仍在 launch）
+    // Declared shapes ride the row (the frontend dropdown renders only these; parse
+    // failures fall back to an empty set — launch stays the authority)
+    let has_web = opt_s("web_path")?.is_some();
+    let has_wasm = opt_s("wasm_path")?.is_some();
+    let supported_modes: Vec<&str> = resolve_supported_windows(&s("manifest")?, has_web, has_wasm)
+        .map(|sup| {
+            let mut v = Vec::new();
+            if sup.embedded.is_some() {
+                v.push("embedded");
+            }
+            if sup.independent.is_some() {
+                v.push("independent");
+            }
+            if sup.headless {
+                v.push("headless");
+            }
+            v
+        })
+        .unwrap_or_default();
+
     Ok(json!({
         "id": s("id")?,
         "name": s("name")?,
@@ -376,6 +405,7 @@ fn row_to_plugin(row: &sqlx::sqlite::SqliteRow) -> Result<Value, String> {
         "wasm_path": opt_s("wasm_path")?,
         "web_path": opt_s("web_path")?,
         "window_mode": s("window_mode")?,
+        "supported_modes": supported_modes,
         "window_config": window_config,
         "is_enabled": i("is_enabled")? != 0,
         "is_installed": i("is_installed")? != 0,
@@ -749,6 +779,10 @@ mod tests {
         // id 非法字符 / invalid id charset
         assert!(plan_install(&manifest_json("\"id\": \"com foo\""), true, false).is_err());
         assert!(plan_install(&manifest_json("\"id\": \"../x\""), true, false).is_err());
+        // __ 前缀保留给宿主共享资源（kapi-plugin:///__kapi__/sdk.js）
+        // The __ prefix is reserved for host-shared assets
+        assert!(plan_install(&manifest_json("\"id\": \"__kapi__\""), true, false).is_err());
+        assert!(plan_install(&manifest_json("\"id\": \"__anything\""), true, false).is_err());
     }
 
     #[test]

@@ -10,6 +10,15 @@ use tauri::{AppHandle, Manager, Runtime};
 // Protocol name: must stay in sync with the frontend URL builder (src/lib/plugin-url.ts)
 pub const SCHEME: &str = "kapi-plugin";
 
+// 保留段：宿主共享资源的命名空间（__ 前缀，插件 id 禁用），当前承载 @kapi/plugin-sdk
+// Reserved segment: the host-shared asset namespace (__ prefix, banned for plugin ids);
+// currently serves @kapi/plugin-sdk
+const SDK_NAMESPACE: &str = "__kapi__";
+// SDK 单文件：构建期内嵌，随宿主版本更新（插件页以绝对路径 /__kapi__/sdk.js 引用）
+// The single-file SDK: embedded at build time and versioned with the host (plugin pages
+// reference it by the absolute path /__kapi__/sdk.js)
+const SDK_JS: &str = include_str!("../assets/kapi-sdk.js");
+
 // 请求解析错误：统一映射为 403/404，响应体不携带任何文件系统细节
 // Request parse errors: mapped to 403/404; response bodies never leak fs details
 #[derive(Debug)]
@@ -53,6 +62,21 @@ fn serve_from(plugins_root: &Path, method: &str, uri_path: &str) -> Response<Cow
         Err(ProtocolError::Forbidden) => return error_response(403, "Forbidden"),
         Err(ProtocolError::NotFound) => return error_response(404, "Not Found"),
     };
+
+    // 保留命名空间：仅 /__kapi__/sdk.js 一个资源，其余一律 404（不落入插件目录查找）
+    // Reserved namespace: exactly one asset /__kapi__/sdk.js; anything else is a 404
+    // (never resolved against plugin directories)
+    if plugin_id == SDK_NAMESPACE {
+        if rel == ["sdk.js"] {
+            return Response::builder()
+                .status(200)
+                .header("Content-Type", "text/javascript; charset=utf-8")
+                .header("Cache-Control", "no-store")
+                .body(Cow::Borrowed(SDK_JS.as_bytes()))
+                .unwrap();
+        }
+        return error_response(404, "Not Found");
+    }
 
     // web 根目录：{plugins_root}/{id}/web —— 协议只暴露该子目录，main.wasm 等不可达
     // Web root: {plugins_root}/{id}/web - the only exposed subtree; main.wasm etc. stay unreachable
@@ -469,6 +493,39 @@ mod tests {
 
         assert_eq!(serve_from(&root, "POST", "/com.foo/index.html").status(), 405);
         assert_eq!(serve_from(&root, "HEAD", "/com.foo/index.html").status(), 405);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- 保留命名空间 / reserved namespace ----
+
+    #[test]
+    fn serves_reserved_sdk_asset() {
+        // SDK 不依赖任何插件目录（根目录为空也能服务）
+        // The SDK never touches plugin directories (an empty root still serves it)
+        let root = temp_root("sdk");
+        let res = serve_from(&root, "GET", "/__kapi__/sdk.js");
+        assert_eq!(res.status(), 200);
+        assert_eq!(
+            res.headers().get("Content-Type").unwrap(),
+            "text/javascript; charset=utf-8"
+        );
+        let body = String::from_utf8_lossy(res.body().as_ref()).to_string();
+        assert!(body.starts_with("// @kapi/plugin-sdk"));
+        assert!(body.contains("kapi:events.on"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reserved_namespace_rejects_other_paths() {
+        let root = temp_root("sdk-404");
+        // 保留段下仅 sdk.js 一个资源；其余（含目录回退）一律 404
+        // Exactly one asset under the reserved segment; anything else (including the
+        // index fallback) is a 404
+        assert_eq!(serve_from(&root, "GET", "/__kapi__/other.js").status(), 404);
+        assert_eq!(serve_from(&root, "GET", "/__kapi__/").status(), 404);
+        assert_eq!(serve_from(&root, "GET", "/__kapi__/../com.foo/x").status(), 403);
 
         let _ = std::fs::remove_dir_all(&root);
     }

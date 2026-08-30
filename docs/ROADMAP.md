@@ -31,6 +31,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 独立窗口定制（manifest.window 对齐 Tauri 窗口选项：transparent/decorations/skipTaskbar/shadow/center/fullscreen + 透明壳加载门控，2026-08-25）
 - [x] wasmtime 运行时（wasmtime 48 + WASI p1：ABI v1 / 单宿主导入 kapi_host_call 复用桥接分发 / fuel 10 亿 + 5s epoch + 64MiB 内存限制 / 模块缓存与 evict；pluginD 全链路示例 + fixture 单测，2026-08-25）
 - [x] headless 启动（立即执行默认动作：run 优先 → 首个 action，成败写 system_logs；Phase 6 工作流接管编排，2026-08-25）
+- [x] @kapi/plugin-sdk 前端 SDK（保留路径 `/__kapi__/sdk.js` 分发 + kapi.events.on/off 订阅推送链路 + pluginA 示范，2026-08-30）
 
 ## 3. 待开发清单
 
@@ -48,7 +49,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] 插件管理器（本地导入安装/卸载/启停/模式切换/排序，2026-08-25；市场安装属 Phase 5）
 - [x] wasmtime 运行时（kapi_invoke ABI + 宿主导入 + fuel/epoch/内存限制，2026-08-25）
 - [x] 桥接 API 与权限模型（plugin_bridge + PermissionGuard 默认拒绝；kapi:plugin.invoke 待 wasmtime、kapi:events.on 待 SDK，2026-08-25）
-- [ ] @kapi/plugin-sdk（插件前端 SDK）与 kapi-plugin-sdk（WASM Rust SDK）
+- [ ] kapi-plugin-sdk（WASM Rust SDK crate 抽取，现内联于 plugins/pluginD/wasm-src；前端 @kapi/plugin-sdk 已就绪）
 - [ ] 插件市场（GitHub API + 安装流程）
 - [ ] 工作流引擎（触发器 + DAG 调度 + 两级日志）
 - [ ] 工作流编辑器（React Flow）

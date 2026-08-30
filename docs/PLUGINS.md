@@ -14,8 +14,8 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 ├── icon.png                        # 128×128 图标
 ├── main.wasm                       # 逻辑入口（可选，纯 UI 插件可省略）
 └── web/                            # UI 资源（可选，headless 插件可省略）
-    ├── index.html
-    ├── main.js                     # 引入 @kapi/plugin-sdk（桥接 RPC 封装）
+    ├── index.html                  # <script src="/__kapi__/sdk.js"> 引入 SDK
+    ├── main.js                     # 使用全局 kapi 对象（桥接 RPC 封装）
     └── style.css
 ```
 
@@ -129,7 +129,7 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 
 ## 4. 桥接 API（已实现：postMessage → plugin_bridge）
 
-插件 UI 通过 `@kapi/plugin-sdk` 调用（SDK 未发布前可按 docs/PANEL.md §3 协议裸调 postMessage，示例见 `plugins/pluginA`）；SDK 内部走 `postMessage('kapi:*')` → `PluginHost` → `plugin_bridge`（权限检查）→ 执行：
+插件 UI 通过 `@kapi/plugin-sdk` 调用——宿主在保留路径 `kapi-plugin:///__kapi__/sdk.js` 分发单文件 SDK（构建期内嵌 `src-tauri/assets/kapi-sdk.js`，随宿主版本更新；`__` 前缀的插件 id 被安装校验拒绝，保留段永不落入插件目录）。插件页以 `<script src="/__kapi__/sdk.js"></script>` 引入后使用全局 `kapi` 对象（示例见 `plugins/pluginA`）：存储 / 剪贴板 / HTTP / 日志 / 窗口 / `kapi.plugin.invoke` / 事件（含订阅），调用均为 Promise，错误抛 `BridgeError`（`.code` 为错误码前缀，机器可解析）。SDK 内部走 `postMessage('kapi:*')` → `PluginHost` → `plugin_bridge`（权限检查）→ 执行；也可按 docs/PANEL.md §3 协议裸调 postMessage（SDK 之外的场景）：
 
 | 通道 | 权限 | 请求 payload | 成功 data |
 | ---- | ---- | ---- | ---- |
@@ -139,8 +139,9 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 | `kapi:clipboard.read` | `clipboard:read` | — | `{text}` |
 | `kapi:clipboard.write` | `clipboard:write` | `{text}` | `null` |
 | `kapi:http.fetch` | `network:host:<domain>` 或 `network:host:*` | `{url, method?, headers?, body?}` | `{status, headers, body}` |
-| `kapi:events.emit` | `events:emit` | `{type, data?}` | `null`（写 plugin_events） |
-| `kapi:events.on` | `events:subscribe` | — | **未实现**（订阅需 SDK 推送协议，随 @kapi/plugin-sdk 落地） |
+| `kapi:events.emit` | `events:emit` | `{type, data?}` | `null`（写 plugin_events 并扇出给订阅者） |
+| `kapi:events.on` | `events:subscribe` | `{type}` | `null`（登记推送：该类型事件扇出时宿主定向推送） |
+| `kapi:events.off` | `events:subscribe` | `{type?}` | `null`（`type` 缺省 = 退订该插件在此窗口的全部订阅） |
 | `kapi:plugin.invoke` | 无需声明（调用自身） | `{action, payload?}` | guest 动作返回的 `data`；未知动作 → `UnknownAction: <name>` |
 | `kapi:window.setTitle` | — | `{title}` | `null` |
 | `kapi:window.getInfo` | — | — | `{mode}`（`"embedded"` \| `"independent"`；只读环境查询，两种模式均可调用，插件据此隐藏/展示窗口控制按钮） |
@@ -148,6 +149,8 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 | `kapi:log.debug/info/warn/error` | — | `{message, data?}` | `null`（写 system_logs，source=`plugin:<id>`） |
 
 > `kapi:window.setTitle` / `minimize` / `startDragging` 仅在插件**自己的独立窗口**内可用（调用方窗口 label 与 `plugin-<id>` 精确匹配）；embedded 模式返回 `WindowNotAllowed`，天然防跨插件控窗。`kapi:window.close` 两种模式均可用：独立窗口真正关窗，embedded 等效「关闭插件页面」（宿主收到 `plugin:close` 后返回插件列表）。`startDragging` 是无边框窗口的唯一移动方式。
+>
+> **事件推送链路**（`kapi.events.on` 背后）：Rust 维护订阅注册表（键 = 宿主窗口 label × 插件 id × 事件类型）；任一插件 `kapi:events.emit`（UI 或 WASM）落库后，对每个订阅者定向 emit `plugin:event`（payload `{pluginId, type, data, source}`），`PluginHost` 过滤 `pluginId` 后以 `{kapiEvent: true, type, data, source}` postMessage 进 iframe，SDK 分发给回调。订阅随窗口销毁自动清理（注册表整 label 移除），SDK 亦在 `pagehide` 尽力退订；WASM 侧调用订阅返回 `EventError`（推送目标是宿主窗口，沙箱内无窗口）。
 
 ## 5. WASM 运行时（已实现：`src-tauri/src/wasm_runtime.rs`，wasmtime 48 + WASI preview1）
 
