@@ -52,7 +52,7 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex w-full items-center justify-between">
         <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           <Zap className="size-3" />
           触发器
@@ -77,28 +77,28 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
       {triggers.length === 0 ? (
         <p className="text-[10px] text-muted-foreground/70">无触发器</p>
       ) : (
-        <div className="space-y-1">
+        <div className="w-full space-y-1">
           {triggers.map((t) => (
             <div
               key={t.id}
-              className="flex items-center gap-2 rounded border bg-background px-2 py-1"
+              className="flex w-full items-center gap-2 rounded border bg-background px-2 py-1"
             >
               <Badge
-                className={`text-[9px] ${TRIGGER_COLORS[t.trigger_type] ?? ""}`}
+                className={`shrink-0 text-[9px] ${TRIGGER_COLORS[t.trigger_type] ?? ""}`}
                 variant="outline"
               >
                 {TRIGGER_LABELS[t.trigger_type] ?? t.trigger_type}
               </Badge>
-              <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
                 {JSON.stringify(t.config)}
               </span>
               {!t.is_enabled && (
-                <span className="text-[9px] text-muted-foreground">已停用</span>
+                <span className="shrink-0 text-[9px] text-muted-foreground">已停用</span>
               )}
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-5 w-5"
+                className="h-5 w-5 shrink-0"
                 onClick={() => onEdit(t)}
                 title="编辑"
               >
@@ -107,7 +107,7 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-5 w-5 text-destructive hover:text-destructive"
+                className="h-5 w-5 shrink-0 text-destructive hover:text-destructive"
                 onClick={() => setPendingDelete(t)}
                 title="删除"
               >

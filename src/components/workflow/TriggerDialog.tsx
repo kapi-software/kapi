@@ -12,6 +12,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useTriggersStore } from "@/stores/triggers";
 import { usePluginsStore } from "@/stores/plugins";
 import type { WorkflowTrigger, TriggerType } from "@/types";
@@ -23,13 +31,12 @@ interface Props {
   trigger?: WorkflowTrigger | null;
 }
 
-const TRIGGER_LABELS: Record<TriggerType, string> = {
-  manual: "手动",
-  schedule: "定时",
-  plugin_event: "插件事件",
-  clipboard: "剪贴板",
-  hotkey: "快捷键",
-};
+const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
+  { value: "schedule", label: "定时" },
+  { value: "plugin_event", label: "插件事件" },
+  { value: "clipboard", label: "剪贴板" },
+  { value: "hotkey", label: "快捷键" },
+];
 
 export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props) {
   const { save } = useTriggersStore();
@@ -68,8 +75,10 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
     }
   }, [trigger, open]);
 
-  // 收集所有可用事件类型
-  const allEventTypes = plugins.flatMap((p) => p.manifest?.workflow?.events ?? []);
+  // 收集所有可用事件类型（去重）
+  const allEventTypes = Array.from(
+    new Set(plugins.flatMap((p) => p.manifest?.workflow?.events ?? []))
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -112,16 +121,18 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
           {/* 触发器类型选择 */}
           <div className="space-y-1.5">
             <Label className="text-xs">类型</Label>
-            <select
-              className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-              value={triggerType}
-              onChange={(e) => setTriggerType(e.target.value as TriggerType)}
-            >
-              <option value="schedule">{TRIGGER_LABELS.schedule}</option>
-              <option value="plugin_event">{TRIGGER_LABELS.plugin_event}</option>
-              <option value="clipboard">{TRIGGER_LABELS.clipboard}</option>
-              <option value="hotkey">{TRIGGER_LABELS.hotkey}</option>
-            </select>
+            <Select value={triggerType} onValueChange={(v) => setTriggerType(v as TriggerType)}>
+              <SelectTrigger className="w-full h-8 text-xs">
+                <SelectValue placeholder="选择类型" />
+              </SelectTrigger>
+              <SelectContent>
+                {TRIGGER_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* 类型特定配置 */}
@@ -142,16 +153,18 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
             <div className="space-y-1.5">
               <Label className="text-xs">事件类型</Label>
               {allEventTypes.length > 0 ? (
-                <select
-                  className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-                  value={eventType}
-                  onChange={(e) => setEventType(e.target.value)}
-                >
-                  <option value="">选择事件...</option>
-                  {allEventTypes.map((e) => (
-                    <option key={e} value={e}>{e}</option>
-                  ))}
-                </select>
+                <Select value={eventType} onValueChange={setEventType}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                    <SelectValue placeholder="选择事件..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allEventTypes.map((e) => (
+                      <SelectItem key={e} value={e} className="text-xs">
+                        {e}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               ) : (
                 <Input
                   className="h-8 text-xs"
@@ -191,13 +204,11 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
           )}
 
           {/* 启用开关 */}
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2 pt-1">
+            <Switch
               id="trigger-enabled"
               checked={isEnabled}
-              onChange={(e) => setIsEnabled(e.target.checked)}
-              className="size-3.5"
+              onCheckedChange={setIsEnabled}
             />
             <Label htmlFor="trigger-enabled" className="text-xs">
               启用
