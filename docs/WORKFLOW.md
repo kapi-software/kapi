@@ -117,9 +117,17 @@ struct WorkflowContext {
 | plugin 节点执行 | `workflow_engine.rs::execute_one_node` | 调用 `WasmRuntime::invoke_action` |
 | transform 节点 | `workflow_engine.rs::execute_one_node` | 记录 warning 日志后跳过（占位） |
 | 两级日志 | `workflow_engine.rs` | `workflow_runs` + `workflow_step_logs` |
-| Manual 触发命令 | `src-tauri/src/lib.rs` | `workflow_execute / workflow_get / workflow_list / workflow_save / workflow_delete / workflow_runs` |
-| 前端 store | `src/stores/workflows.ts` | Zustand store（模式同 `plugins.ts`） |
-| Workflow 页面 | `src/pages/Workflow.tsx` | 列表 + 内嵌 JSON 编辑 + 手动运行 |
+| Manual 触发命令 | `src-tauri/src/lib.rs` | `workflow_execute / workflow_get / workflow_list / workflow_save / workflow_delete / workflow_runs / workflow_run_steps` |
+| 前端 store | `src/stores/workflows.ts` | Zustand store（模式同 `plugins.ts`）；含 `getRunSteps` |
+| Workflow 列表页 | `src/pages/Workflow.tsx` | 卡片 + 启停 + 运行 + 跳转路由入口 |
+| Workflow 编辑器页 | `src/pages/WorkflowEditor.tsx` | 新路由 `/workflow/new` 与 `/workflow/:id/edit`；React Flow 可视化（@xyflow/react v12） |
+| Node palette | `src/components/workflow/NodePalette.tsx` | 左栏按 plugin 分组的 action 列表；点击或 HTML5 拖拽到画布 |
+| Node inspector | `WorkflowEditor.tsx::NodeInspector` | 右栏选中节点编辑（plugin / action / config JSON） |
+| Bindings editor | `src/components/workflow/BindingsEditor.tsx` | 底栏源→输出→目标→输入字段映射表；选中下游节点时聚焦 |
+| 自定义节点 | `src/components/workflow/WorkflowNodeCard.tsx` | React Flow 自定义节点（plugin 名 + action + Handle） |
+| 运行历史面板 | `src/components/workflow/RunHistoryPanel.tsx` | 列表页（折叠模式）+ 历史页（整页模式）共用 |
+| Workflow 运行历史页 | `src/pages/WorkflowRuns.tsx` | 新路由 `/workflow/:id/runs`；整页展示历史 |
+| 运行历史面板（已抽） | `src/pages/Workflow.tsx::RunHistoryPanel`（旧内联） | 已抽出到独立文件，列表页改用折叠卡入口 |
 
 ### 4.2 尚未实现（扩展点）
 
@@ -130,7 +138,7 @@ struct WorkflowContext {
 | schedule 触发器 | 占位 | `TriggerType::Schedule`，需 `tokio::time::interval` |
 | plugin_event 触发器 | 占位 | `TriggerType::PluginEvent`，需监听 `plugin_events` 表 |
 | transform 节点实现 | 占位 | JSON 模板映射（`jq` 或手动拼装） |
-| React Flow 可视化编辑器 | 待做 | Phase 7 目标，当前 v1 为内嵌 JSON 编辑 |
+| React Flow 可视化编辑器 | 已做 | Phase 7 完成；`/workflow/new` 与 `/workflow/:id/edit` 两路由；编辑器含 palette / canvas / inspector / bindings 四区域 |
 
 ### 4.3 数据库表
 

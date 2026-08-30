@@ -20,11 +20,14 @@ import Dashboard from "@/pages/Dashboard";
 import Plugins from "@/pages/Plugins";
 import Store from "@/pages/Store";
 import Workflow from "@/pages/Workflow";
+import WorkflowEditor from "@/pages/WorkflowEditor";
+import WorkflowRuns from "@/pages/WorkflowRuns";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
 import PluginEmbedView from "@/pages/PluginEmbedView";
 import PluginWindowShell from "@/pages/PluginWindowShell";
 import { Toaster } from "@/components/ui/sonner";
+import { StandaloneLayout } from "@/components/layout/StandaloneLayout";
 
 // 主面板布局（shadcn sidebar-16）：全宽顶栏置顶 + 经典侧边栏 + 滚动内容区
 // Panel layout (shadcn sidebar-16): full-width header on top, classic sidebar, scrolling content
@@ -80,9 +83,9 @@ function PanelLayout() {
       className="flex h-svh flex-col"
       style={
         {
-          // 顶栏高度 48px（官方 demo 为 32px，偏挤；上一版 56px 偏高）
-          // Header height 48px (official demo 32px feels cramped; 56px felt tall)
-          "--header-height": "calc(var(--spacing) * 12)",
+          // 顶栏高度 36px（更紧凑）
+          // Header height 36px (more compact)
+          "--header-height": "2.25rem",
           "--sidebar-width": "12rem",
           "--sidebar-width-icon": "3rem",
         } as CSSProperties
@@ -91,11 +94,17 @@ function PanelLayout() {
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <AppSidebar />
-        <main className="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 md:p-6">
-          <Outlet />
+        <main className="min-w-0 flex-1 overflow-y-auto overscroll-contain">
+          {/* 内容区：明显区分背景色 */}
+          {/* Content area with a distinct background */}
+          <div className="min-h-full bg-muted/40 p-3 md:p-4">
+            <Outlet />
+          </div>
         </main>
       </div>
-      <Toaster />
+      {/* 右上角 toast：避开右侧 Dock 触发区 */}
+      {/* Top-right toasts: clear of the right-edge dock hotzone */}
+      <Toaster position="top-right" offset={56} />
     </SidebarProvider>
   );
 }
@@ -246,14 +255,30 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* 独立页面：Logs / Settings / WorkflowEditor / PluginEmbed — 无侧边栏 */}
+        {/* Standalone pages: no sidebar */}
+        <Route
+          element={
+            <StandaloneLayout>
+              <Outlet />
+            </StandaloneLayout>
+          }
+        >
+          <Route path="/logs" element={<Logs />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/workflow/new" element={<WorkflowEditor />} />
+          <Route path="/workflow/:id/edit" element={<WorkflowEditor />} />
+          <Route path="/plugin/:id" element={<PluginEmbedView />} />
+        </Route>
+
+        {/* 主面板：Dashboard / Plugins / Store / Workflow 列表 — 侧边栏布局 */}
+        {/* Panel layout pages: sidebar */}
         <Route element={<PanelLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/plugins" element={<Plugins />} />
-          <Route path="/plugin/:id" element={<PluginEmbedView />} />
           <Route path="/store" element={<Store />} />
           <Route path="/workflow" element={<Workflow />} />
-          <Route path="/logs" element={<Logs />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/workflow/:id/runs" element={<WorkflowRuns />} />
         </Route>
       </Routes>
     </BrowserRouter>

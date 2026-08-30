@@ -18,7 +18,7 @@
 | **Dock 侧边栏** | 屏幕右缘弧形启动栏，热区轮询触发。**仅负责唤醒插件**（分发逻辑集中在 Rust）。 | ✅ 已完成 |
 | **系统托盘** | 驻留运行：关闭即收入托盘，提供主面板 / 设置 / 退出菜单。 | ✅ 已完成 |
 | **插件系统** | WASM 沙箱逻辑（wasmtime 48 + WASI p1：ABI v1 / fuel + 5s 超时 + 内存上限）+ Web UI。`kapi-plugin://` 协议、安装/卸载/启停/模式切换、内嵌与独立窗口宿主、postMessage 桥接（UI 与 WASM 共用默认拒绝的权限模型）、Tauri 式窗口定制（透明/无边框等）、headless 启动即执行默认动作。插件 SDK（`@kapi/plugin-sdk`、`kapi-plugin-sdk`）待做。 | 🔨 开发中 |
-| **工作流系统** | 基于触发器的 DAG 步骤图，支持跨插件数据流（例如：剪贴板监听 → 美化并保存 → 截图）。 | Phase 6 |
+| **工作流系统** | 基于触发器的 DAG 步骤图，支持跨插件数据流（例如：剪贴板监听 → 美化并保存 → 截图）。**Phase 6 已交付**：Kahn 拓扑调度（`workflow_engine.rs`）、两级日志（`workflow_runs` + `workflow_step_logs`）、手动触发 + plugin 节点（经 `WasmRuntime::invoke_action`）、失败即终止。**Phase 7 已交付**：React Flow 可视化编辑器（`@xyflow/react`），路由 `/workflow/new` 与 `/workflow/:id/edit`，含 palette / canvas / inspector / bindings 四区域；专用历史页 `/workflow/:id/runs`。待做：clipboard / hotkey / schedule / plugin_event 触发器、transform 节点。 | ✅ 已完成 |
 | **本地数据库** | 通过 `tauri-plugin-sql` 使用 SQLite。Rust 侧统一管理迁移入口。 | ✅ 已完成 |
 
 ---

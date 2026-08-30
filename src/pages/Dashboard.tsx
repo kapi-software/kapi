@@ -40,15 +40,10 @@ export default function Dashboard() {
   }, [ready]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">{t("dashboard.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+    <div className="space-y-4">
+      <Card className="gap-3 p-4">
+        <CardHeader className="p-0">
+          <CardTitle className="flex items-center gap-2 text-base">
             {t("dashboard.dbTitle")}
             {status === "ok" && (
               <Badge variant="default">{t("dashboard.statusOk", { count: rowCount })}</Badge>
@@ -59,7 +54,7 @@ export default function Dashboard() {
           </CardTitle>
           <CardDescription>{t("dashboard.dbDesc")}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm">
+        <CardContent className="space-y-2 p-0 text-sm">
           {status === "browser" && (
             <p className="text-muted-foreground">{t("dashboard.browserHint")}</p>
           )}
@@ -96,12 +91,12 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("dashboard.roadmapTitle")}</CardTitle>
+      <Card className="gap-3 p-4">
+        <CardHeader className="p-0">
+          <CardTitle className="text-base">{t("dashboard.roadmapTitle")}</CardTitle>
           <CardDescription>{t("dashboard.roadmapDesc")}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
             <li>{t("dashboard.phase1")}</li>
             <li className="opacity-60">{t("dashboard.phase2")}</li>

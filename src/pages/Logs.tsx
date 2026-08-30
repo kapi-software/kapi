@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, ScrollText, Zap } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -102,127 +102,119 @@ export default function Logs() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">{t("logs.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("logs.subtitle", { count: FETCH_LIMIT })}</p>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+      <Card className="gap-3 p-4">
+        {/* 工具行：视图切换 + （日志视图）级别过滤 + 自动刷新 + 手动刷新 */}
+        {/* Toolbar: view switch + (logs view) level filter + auto/manual refresh */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant={view === "logs" ? "default" : "outline"}
+              className="h-7 gap-1.5 px-2.5 text-xs"
+              onClick={() => setView("logs")}
+            >
+              <ScrollText className="size-3.5" />
+              {t("logs.viewLogs")}
+            </Button>
+            <Button
+              size="sm"
+              variant={view === "events" ? "default" : "outline"}
+              className="h-7 gap-1.5 px-2.5 text-xs"
+              onClick={() => setView("events")}
+            >
+              <Zap className="size-3.5" />
+              {t("logs.viewEvents")}
+            </Button>
+          </div>
+          {view === "logs" &&
+            LEVEL_FILTERS.map((level) => (
+              <Button
+                key={level}
+                size="sm"
+                variant={levelFilter === level ? "default" : "outline"}
+                className="h-7 px-2.5 font-mono text-xs lowercase"
+                onClick={() => setLevelFilter(level)}
+              >
+                {level === "all" ? t("logs.levelAll") : level}
+              </Button>
+            ))}
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t("logs.autoRefresh")}</span>
+            <Switch size="sm" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 px-2.5"
+              disabled={refreshing}
+              onClick={() => refresh(true)}
+            >
+              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+              {t("logs.refresh")}
+            </Button>
+          </div>
+        </div>
 
-      <Card>
-        <CardHeader>
-          {/* 工具行：视图切换 + （日志视图）级别过滤 + 自动刷新 + 手动刷新 */}
-          {/* Toolbar: view switch + (logs view) level filter + auto/manual refresh */}
-          <CardTitle className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant={view === "logs" ? "default" : "outline"}
-                className="h-7 gap-1.5 px-2.5 text-xs"
-                onClick={() => setView("logs")}
-              >
-                <ScrollText className="size-3.5" />
-                {t("logs.viewLogs")}
-              </Button>
-              <Button
-                size="sm"
-                variant={view === "events" ? "default" : "outline"}
-                className="h-7 gap-1.5 px-2.5 text-xs"
-                onClick={() => setView("events")}
-              >
-                <Zap className="size-3.5" />
-                {t("logs.viewEvents")}
-              </Button>
-            </div>
-            {view === "logs" &&
-              LEVEL_FILTERS.map((level) => (
-                <Button
-                  key={level}
-                  size="sm"
-                  variant={levelFilter === level ? "default" : "outline"}
-                  className="h-7 px-2.5 font-mono text-xs lowercase"
-                  onClick={() => setLevelFilter(level)}
-                >
-                  {level === "all" ? t("logs.levelAll") : level}
-                </Button>
-              ))}
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">{t("logs.autoRefresh")}</span>
-              <Switch size="sm" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1.5 px-2.5"
-                disabled={refreshing}
-                onClick={() => refresh(true)}
-              >
-                <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-                {t("logs.refresh")}
-              </Button>
-            </div>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!loaded && <p className="text-sm text-muted-foreground">{t("logs.loading")}</p>}
+        {!loaded && <p className="text-sm text-muted-foreground">{t("logs.loading")}</p>}
 
-          {/* 系统日志视图 / system-log view */}
-          {loaded && view === "logs" && (
-            <>
-              {filtered.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {logs.length === 0 ? t("logs.empty") : t("logs.emptyFiltered")}
+        {/* 系统日志视图 / system-log view */}
+        {loaded && view === "logs" && (
+          <>
+            {filtered.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {logs.length === 0 ? t("logs.empty") : t("logs.emptyFiltered")}
+              </p>
+            )}
+            {filtered.length > 0 && (
+              <>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  {t("logs.shownCount", { shown: filtered.length, total: logs.length })}
                 </p>
-              )}
-              {filtered.length > 0 && (
-                <>
-                  <p className="mb-2 text-xs text-muted-foreground">
-                    {t("logs.shownCount", { shown: filtered.length, total: logs.length })}
-                  </p>
-                  <ul className="space-y-1 font-mono text-xs">
-                    {filtered.map((log) => (
-                      <li key={log.id} className="flex items-start gap-2">
-                        <Badge variant={levelVariant(log.level)} className="mt-0.5 shrink-0 lowercase">
-                          {log.level}
-                        </Badge>
-                        <span className="shrink-0 text-muted-foreground">{log.created_at}</span>
-                        <span className="min-w-0 break-all">{log.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
-
-          {/* 插件事件视图 / plugin-event view */}
-          {loaded && view === "events" && (
-            <>
-              {events.length === 0 && (
-                <p className="text-sm text-muted-foreground">{t("logs.eventsEmpty")}</p>
-              )}
-              {events.length > 0 && (
                 <ul className="space-y-1 font-mono text-xs">
-                  {events.map((ev) => (
-                    <li key={ev.id} className="flex items-start gap-2">
-                      <Badge variant="outline" className="mt-0.5 shrink-0">
-                        <Zap className="mr-1 size-3" />
-                        {ev.event_type}
+                  {filtered.map((log) => (
+                    <li key={log.id} className="flex items-start gap-2">
+                      <Badge variant={levelVariant(log.level)} className="mt-0.5 shrink-0 lowercase">
+                        {log.level}
                       </Badge>
-                      <span className="shrink-0 text-muted-foreground">{ev.created_at}</span>
-                      <span className="shrink-0 text-muted-foreground/80">
-                        {ev.source_plugin_id ?? t("logs.eventSourceUnknown")}
-                      </span>
-                      {ev.data && (
-                        <span className="min-w-0 break-all" title={ev.data}>
-                          {shortenData(ev.data)}
-                        </span>
-                      )}
+                      <span className="shrink-0 text-muted-foreground">{log.created_at}</span>
+                      <span className="min-w-0 break-all">{log.message}</span>
                     </li>
                   ))}
                 </ul>
-              )}
-            </>
-          )}
-        </CardContent>
+              </>
+            )}
+          </>
+        )}
+
+        {/* 插件事件视图 / plugin-event view */}
+        {loaded && view === "events" && (
+          <>
+            {events.length === 0 && (
+              <p className="text-sm text-muted-foreground">{t("logs.eventsEmpty")}</p>
+            )}
+            {events.length > 0 && (
+              <ul className="space-y-1 font-mono text-xs">
+                {events.map((ev) => (
+                  <li key={ev.id} className="flex items-start gap-2">
+                    <Badge variant="outline" className="mt-0.5 shrink-0">
+                      <Zap className="mr-1 size-3" />
+                      {ev.event_type}
+                    </Badge>
+                    <span className="shrink-0 text-muted-foreground">{ev.created_at}</span>
+                    <span className="shrink-0 text-muted-foreground/80">
+                      {ev.source_plugin_id ?? t("logs.eventSourceUnknown")}
+                    </span>
+                    {ev.data && (
+                      <span className="min-w-0 break-all" title={ev.data}>
+                        {shortenData(ev.data)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
       </Card>
     </div>
   );
