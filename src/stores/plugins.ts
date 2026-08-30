@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { initDb, pluginDb } from "@/lib/db";
+import { initDb, pluginDb, eventDb } from "@/lib/db";
 import type { Plugin, WindowMode } from "@/types";
 import type { StoreEntry } from "@/lib/store";
 
@@ -28,6 +28,9 @@ interface PluginsState {
   // 市场列表：refresh=false 读本地缓存（无缓存回源），true 强制回源并更新缓存
   // Store listing: refresh=false serves the local cache (fetching when empty), true refetches
   listStore: (refresh: boolean) => Promise<StoreEntry[]>;
+  // 从 plugin_events 历史表读取所有已出现过的事件类型（按最近倒序）
+  // Pull distinct event types seen in plugin_events history (most recent first)
+  getDistinctEventTypes: () => Promise<string[]>;
   uninstall: (id: string) => Promise<void>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
   setWindowMode: (id: string, mode: WindowMode) => Promise<void>;
@@ -75,6 +78,17 @@ export const usePluginsStore = create<PluginsState>((set, get) => ({
   // the page surfaces the hint)
   async listStore(refresh) {
     return invoke<StoreEntry[]>("store_list", { refresh });
+  },
+
+  async getDistinctEventTypes() {
+    try {
+      const events = await eventDb.getRecent(500);
+      const distinct = new Set<string>();
+      for (const e of events) distinct.add(e.event_type);
+      return Array.from(distinct);
+    } catch {
+      return [];
+    }
   },
 
   async uninstall(id) {

@@ -23,6 +23,14 @@ import { Switch } from "@/components/ui/switch";
 import { useTriggersStore } from "@/stores/triggers";
 import { usePluginsStore } from "@/stores/plugins";
 import type { WorkflowTrigger, TriggerType } from "@/types";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxEmpty,
+} from "@/components/ui/combobox";
 
 interface Props {
   open: boolean;
@@ -40,7 +48,10 @@ const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
 
 export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props) {
   const { save } = useTriggersStore();
-  const { plugins } = usePluginsStore();
+  const { plugins, getDistinctEventTypes } = usePluginsStore();
+  // 合并：插件 manifest 声明 + 历史事件表已出现的事件
+  // Merge: plugin manifest declarations + events seen in plugin_events history
+  const [historyEvents, setHistoryEvents] = useState<string[]>([]);
   const [triggerType, setTriggerType] = useState<TriggerType>("schedule");
   const [isEnabled, setIsEnabled] = useState(true);
   // 各类型配置
@@ -76,9 +87,32 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
   }, [trigger, open]);
 
   // 收集所有可用事件类型（去重）
-  const allEventTypes = Array.from(
+  // manifest 声明 + 历史事件合并
+  // Collect all available event types: merge manifest declarations + history
+  const manifestEvents = Array.from(
     new Set(plugins.flatMap((p) => p.manifest?.workflow?.events ?? []))
   );
+  const allEventTypes = Array.from(
+    new Set([...manifestEvents, ...historyEvents])
+  );
+  // 标记每个事件来源（用于下拉框标签）
+  // Tag each event with its source for the dropdown
+  const eventSourceOf = (e: string): "manifest" | "history" | "both" => {
+    const inManifest = manifestEvents.includes(e);
+    const inHistory = historyEvents.includes(e);
+    if (inManifest && inHistory) return "both";
+    if (inManifest) return "manifest";
+    return "history";
+  };
+
+  // 打开时加载历史事件
+  // Load history events on open
+  useEffect(() => {
+    if (!open || triggerType !== "plugin_event") return;
+    getDistinctEventTypes()
+      .then(setHistoryEvents)
+      .catch(() => setHistoryEvents([]));
+  }, [open, triggerType, getDistinctEventTypes]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -151,20 +185,46 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
 
           {triggerType === "plugin_event" && (
             <div className="space-y-1.5">
-              <Label className="text-xs">事件类型</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">事件类型</Label>
+                <span className="text-[10px] text-muted-foreground/70">
+                  共 {allEventTypes.length} 个 ·{" "}
+                  清单 {manifestEvents.length} · 历史 {historyEvents.length}
+                </span>
+              </div>
               {allEventTypes.length > 0 ? (
-                <Select value={eventType} onValueChange={setEventType}>
-                  <SelectTrigger className="w-full h-8 text-xs">
-                    <SelectValue placeholder="选择事件..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allEventTypes.map((e) => (
-                      <SelectItem key={e} value={e} className="text-xs">
-                        {e}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={eventType}
+                  onValueChange={(v) => setEventType(v as string)}
+                >
+                  <ComboboxInput
+                    placeholder="搜索事件类型..."
+                    className="w-full"
+                    showTrigger
+                  />
+                  <ComboboxContent>
+                    <ComboboxList>
+                      <ComboboxEmpty className="text-xs">未找到匹配事件</ComboboxEmpty>
+                      {allEventTypes.map((e) => {
+                        const src = eventSourceOf(e);
+                        const suffix =
+                          src === "both"
+                            ? "（清单+历史）"
+                            : src === "history"
+                              ? "（仅历史）"
+                              : "（清单）";
+                        return (
+                          <ComboboxItem key={e} value={e} className="text-xs">
+                            <span className="font-mono">{e}</span>
+                            <span className="ml-2 text-[10px] text-muted-foreground">
+                              {suffix}
+                            </span>
+                          </ComboboxItem>
+                        );
+                      })}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
               ) : (
                 <Input
                   className="h-8 text-xs"
@@ -173,6 +233,9 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
                   placeholder="如 clipboard_changed"
                 />
               )}
+              <p className="text-[10px] text-muted-foreground/70">
+                清单 = 插件 manifest 声明 · 历史 = plugin_events 表中实际出现过的事件
+              </p>
             </div>
           )}
 
