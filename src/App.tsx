@@ -1,7 +1,7 @@
 // 应用根组件：窗口分流、主题与语言应用、主面板布局与路由
 // Root component: window routing, theme & language application, panel layout and routes
 import { useEffect, useState, type CSSProperties } from "react";
-import { BrowserRouter, Routes, Route, Outlet, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -30,6 +30,7 @@ import { Toaster } from "@/components/ui/sonner";
 // Panel layout (shadcn sidebar-16): full-width header on top, classic sidebar, scrolling content
 function PanelLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // 托盘「设置」菜单 → Rust 发来 app:navigate，主窗口内跳转对应路由
   // Tray "Settings" menu → Rust emits app:navigate; the main window routes accordingly
@@ -43,17 +44,32 @@ function PanelLayout() {
     };
   }, [navigate]);
 
-  // launch_plugin（embedded 模式）→ Rust 发来 plugin:navigate，路由到内嵌视图
+  // launch_plugin（embedded 模式）→ Rust 发来 plugin:navigate，路由到内嵌视图（带形态入口）
   // launch_plugin (embedded mode) → Rust emits plugin:navigate; route to the embed view
   useEffect(() => {
     if (!isTauri()) return;
-    const un = listen<string>("plugin:navigate", (e) => {
-      navigate(`/plugin/${e.payload}`);
+    const un = listen<{ id: string; entry?: string }>("plugin:navigate", (e) => {
+      const { id, entry } = e.payload;
+      const suffix =
+        entry && entry !== "index.html" ? `?entry=${encodeURIComponent(entry)}` : "";
+      navigate(`/plugin/${id}${suffix}`);
     });
     return () => {
       un.then((f) => f());
     };
   }, [navigate]);
+
+  // 内嵌插件调用 kapi:window.close → 等效关闭插件页面，回到插件列表
+  // An embedded plugin calling kapi:window.close → closes the embed view, back to the list
+  useEffect(() => {
+    if (!isTauri()) return;
+    const un = listen("plugin:close", () => {
+      if (location.pathname.startsWith("/plugin/")) navigate("/plugins");
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [navigate, location]);
 
   return (
     // sidebar-16：纵向排列（顶栏在上），侧边栏固定面板经 --header-height 下移

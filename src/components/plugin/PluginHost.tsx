@@ -10,10 +10,14 @@ import { invokeTyped, isTauri } from "@/lib/tauri";
 
 export function PluginHost({
   pluginId,
+  entry,
   className,
   onLoaded,
 }: {
   pluginId: string;
+  // 入口文件（web/ 相对路径，来自 manifest windows[].entry 的形态入口；缺省 index.html）
+  // Entry file (web/-relative, the per-shape entry from manifest windows[].entry; default index.html)
+  entry?: string;
   className?: string;
   // iframe 加载完成回调（独立窗口壳用于就绪后 show，防启动闪白）
   // iframe load callback (the shell shows the window once ready, avoiding a startup flash)
@@ -37,7 +41,7 @@ export function PluginHost({
   return (
     <iframe
       ref={frameRef}
-      src={pluginAssetUrl(pluginId)}
+      src={pluginAssetUrl(pluginId, entry)}
       title={`plugin-${pluginId}`}
       onLoad={onLoaded}
       // 沙箱最小权限：允许脚本 / 表单；跨源隔离天然成立（kapi-plugin 与宿主不同源）

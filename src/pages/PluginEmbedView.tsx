@@ -1,18 +1,23 @@
 // 内嵌插件视图：/plugin/:id（面板外壳内的 PluginHost，docs/PANEL.md）
 // Embedded plugin view: /plugin/:id (PluginHost inside the panel shell)
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PluginHost } from "@/components/plugin/PluginHost";
 import { isTauri } from "@/lib/tauri";
+import { safeEntry } from "@/lib/plugin-url";
 import { initDb, pluginDb } from "@/lib/db";
 import type { Plugin } from "@/types";
 
 export default function PluginEmbedView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // 形态入口由 plugin:navigate 携带来（App.tsx 拼进 ?entry=），非法值回退 index.html
+  // The per-shape entry arrives via plugin:navigate (App.tsx appends ?entry=); invalid → index.html
+  const [searchParams] = useSearchParams();
+  const entry = safeEntry(searchParams.get("entry"));
   const [plugin, setPlugin] = useState<Plugin | null>(null);
 
   // 插件元信息仅用于页头展示；iframe 加载不依赖它
@@ -52,7 +57,7 @@ export default function PluginEmbedView() {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
-        <PluginHost pluginId={id} />
+        <PluginHost pluginId={id} entry={entry} />
       </div>
     </div>
   );

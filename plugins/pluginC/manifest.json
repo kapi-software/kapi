@@ -4,20 +4,27 @@
   "version": "1.0.0",
   "kapi_version": "^1.0.0",
   "author": "Kapi",
-  "description": "窗口定制示例：透明背景 + 无边框 + 置顶 + 跳过任务栏；拖拽与窗口控制走桥接通道",
+  "description": "窗口定制示例：windows[] 声明双形态各自入口——独立透明小组件（index.html）与内嵌面板页（embedded.html）",
   "category": "tool",
   "permissions": [],
-  "window": {
-    "mode": "independent",
-    "title": "透明小组件 / Transparent Widget",
-    "width": 300,
-    "height": 200,
-    "resizable": false,
-    "alwaysOnTop": true,
-    "transparent": true,
-    "decorations": false,
-    "skipTaskbar": true,
-    "shadow": true,
-    "center": true
-  }
+  "windows": [
+    {
+      "mode": "independent",
+      "entry": "index.html",
+      "title": "透明小组件 / Transparent Widget",
+      "width": 300,
+      "height": 200,
+      "resizable": false,
+      "alwaysOnTop": true,
+      "transparent": true,
+      "decorations": false,
+      "skipTaskbar": true,
+      "shadow": true,
+      "center": true
+    },
+    {
+      "mode": "embedded",
+      "entry": "embedded.html"
+    }
+  ]
 }

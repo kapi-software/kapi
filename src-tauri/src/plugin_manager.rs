@@ -245,11 +245,29 @@ pub fn plan_install(
         .to_string(),
     };
 
-    // window_config 快照：仅当 manifest 声明了 window 时入库
-    // window_config snapshot: stored only when the manifest declares a window
-    let window_config = match &manifest.window {
-        Some(w) => Some(serde_json::to_string(w).map_err(|e| e.to_string())?),
-        None => None,
+    // window_config 快照：independent 形态的窗口参数（windows[] 条目优先，legacy window 回退）。
+    // 独立窗口壳（PluginWindowShell）读它做首帧透明判定，windows[] 插件不能缺失
+    // window_config snapshot: the independent shape's params (windows[] entry first,
+    // legacy window fallback). The independent shell (PluginWindowShell) reads it for the
+    // first-frame transparency decision, so windows[] plugins must not miss it
+    let window_config = match supported.independent.as_ref() {
+        Some(indep) => {
+            // windows[] 路径：参数 + mode 键，保持前端 PluginWindowConfig 形状
+            // windows[] path: params plus the mode key, matching the frontend PluginWindowConfig shape
+            let mut v = serde_json::to_value(&indep.params).map_err(|e| e.to_string())?;
+            if let Value::Object(map) = &mut v {
+                map.insert("mode".into(), Value::String("independent".into()));
+            }
+            Some(v.to_string())
+        }
+        // legacy 路径：整个 window 原样快照（含 mode）
+        // legacy path: snapshot the whole window verbatim (mode included)
+        None => manifest
+            .window
+            .as_ref()
+            .map(|w| serde_json::to_string(w))
+            .transpose()
+            .map_err(|e| e.to_string())?,
     };
 
     Ok(InstallPlan {
@@ -931,10 +949,23 @@ mod tests {
         // 仅声明 independent：默认模式取 independent / independent-only: defaults to independent
         let indep_only = r#"{
             "id":"com.example.demo","name":"Demo","version":"1.0.0",
-            "windows":[{"mode":"independent","entry":"window.html","width":300}]
+            "windows":[{"mode":"independent","entry":"window.html","width":300,"transparent":true}]
         }"#;
         let plan = plan_install(indep_only, true, false).unwrap();
         assert_eq!(plan.window_mode, "independent");
+        // windows[] 路径的 window_config 快照：independent 形态参数 + mode 键
+        // window_config snapshot on the windows[] path: the independent params + mode key
+        let wc = plan.window_config.unwrap();
+        assert!(wc.contains("\"mode\":\"independent\""));
+        assert!(wc.contains("\"width\":300.0"));
+        assert!(wc.contains("\"transparent\":true"));
+
+        // 仅 embedded：无 independent 形态则无快照 / embedded-only: no shape, no snapshot
+        let embed_only = r#"{
+            "id":"com.example.demo","name":"Demo","version":"1.0.0",
+            "windows":[{"mode":"embedded","entry":"a.html"}]
+        }"#;
+        assert_eq!(plan_install(embed_only, true, false).unwrap().window_config, None);
 
         // 存在性核验：src 缺文件时 ensure_entries_exist 拒绝 / existence check rejects
         let root = temp_dir_for("entries");

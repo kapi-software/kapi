@@ -50,6 +50,13 @@ com.example.code-beautifier/        # 目录名 = 插件 id
     "fullscreen": false
   },
 
+  // 多形态声明（可选；存在时优先于 window，见 §2.1）：每形态各自入口与窗口参数
+  "windows": [
+    { "mode": "embedded",    "entry": "index.html" },
+    { "mode": "independent", "entry": "widget.html",
+      "width": 300, "height": 200, "decorations": false }
+  ],
+
   // 工作流能力声明（headless 插件的主要形态）
   "workflow": {
     "triggers": ["clipboard_changed"],
@@ -79,9 +86,16 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 
 三种模式共用同一套桥接 API 与 WASM 入口；`window_mode` 用户可随时在插件管理页切换。
 
+**形态声明（`window` / `windows[]`）**：manifest 以 `windows[]` 数组声明插件支持哪些形态——每条目携带 `mode`、`entry`（web/ 相对入口文件，缺省 `index.html`）与该形态自己的窗口参数（§2.2 字段集）；无数组时回退 legacy `window` 字段（单形态、入口固定 `index.html`）。`headless` 不是 `windows[]` 模式——其支持性等价于是否存在 `main.wasm`。
+
+- 安装校验：mode 白名单且不得重复、entry 路径安全（slug 段、无穿越）、entry 文件必须真实存在。
+- 形态锁定：仅声明一种窗口形态的插件，启动未声明形态返回 `UnsupportedMode`；双形态声明则两者均可切换。
+- 默认 `window_mode`：按支持形态推导（embedded 优先），legacy `window.mode` 显式声明优先。
+- 入口随形态路由：embedded → `/plugin/:id?entry=<entry>`，independent → 建窗 URL 携带 `?entry=<entry>`；前端对 entry 做 slug 校验（`src/lib/plugin-url.ts` `safeEntry`），非法值回退 `index.html`。
+
 ### 2.2 独立窗口选项（对齐 Tauri 窗口设置）
 
-`window` 内除 `mode` 外的字段仅在 **independent** 模式下生效，安装时快照进 `plugins.window_config`（改 manifest 窗口字段需重装生效；更新流程属 Phase 5）：
+`window` 内除 `mode` 外的字段（`windows[]` 条目内的同名字段同理）仅在 **independent** 模式下生效。安装时 independent 形态的参数快照进 `plugins.window_config`（`windows[]` 条目优先，legacy `window` 回退），独立窗口壳读它做首帧透明判定；窗口参数以安装时的 manifest 为准，修改需重装（更新流程属 Phase 5）：
 
 | 字段 | 类型 | 默认 | 说明 |
 | ---- | ---- | ---- | ---- |
@@ -133,7 +147,7 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 | `kapi:window.close` / `minimize` / `startDragging` | — | — | `null` |
 | `kapi:log.debug/info/warn/error` | — | `{message, data?}` | `null`（写 system_logs，source=`plugin:<id>`） |
 
-> `kapi:window.*` 仅在插件**自己的独立窗口**内可用（调用方窗口 label 与 `plugin-<id>` 精确匹配）；embedded 模式返回 `WindowNotAllowed`，天然防跨插件控窗。`startDragging` 是无边框窗口的唯一移动方式。
+> `kapi:window.setTitle` / `minimize` / `startDragging` 仅在插件**自己的独立窗口**内可用（调用方窗口 label 与 `plugin-<id>` 精确匹配）；embedded 模式返回 `WindowNotAllowed`，天然防跨插件控窗。`kapi:window.close` 两种模式均可用：独立窗口真正关窗，embedded 等效「关闭插件页面」（宿主收到 `plugin:close` 后返回插件列表）。`startDragging` 是无边框窗口的唯一移动方式。
 
 ## 5. WASM 运行时（已实现：`src-tauri/src/wasm_runtime.rs`，wasmtime 48 + WASI preview1）
 
@@ -164,8 +178,8 @@ com.example.code-beautifier/        # 目录名 = 插件 id
 安装(市场/本地导入) → 校验 manifest → 复制到 plugins/{id}/ → 写 plugins 表（+evict wasm 缓存）→ 就绪
     ↓
 运行: launch_plugin 按模式分发（ARCHITECTURE.md §2.3）
-    ├─ embedded → 主面板 /plugin/:id
-    ├─ independent → 独立窗口（manifest.window，含透明/无边框等定制）
+    ├─ embedded → 主面板 /plugin/:id?entry=<形态入口>
+    ├─ independent → 独立窗口（该形态参数建窗，URL 携带 ?entry=<形态入口>）
     └─ headless → 立即执行一次默认动作（run 优先 → 首个 action → "run"），
        成败写 system_logs（source = plugin:<id>）；Phase 6 工作流引擎接管触发编排
     ↓

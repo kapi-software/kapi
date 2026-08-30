@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>示例插件 C · 内嵌</title>
+    <style>
+      /* 内嵌页：普通不透明面板内容，无窗口定制样式 */
+      /* Embedded page: plain opaque panel content, no window customization */
+      :root { color-scheme: light dark; }
+      html,
+      body {
+        margin: 0;
+        height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        color: #6366f1;
+        user-select: none;
+      }
+      .page {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+      }
+      p {
+        margin: 0;
+        font-size: 12px;
+        opacity: 0.75;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: auto;
+      }
+      button {
+        font-size: 12px;
+        padding: 6px 14px;
+        border: none;
+        border-radius: 999px;
+        background: rgba(99, 102, 241, 0.88);
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #status {
+        font-size: 11px;
+        opacity: 0.85;
+        min-height: 1.2em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>示例插件 C · 内嵌页（embedded.html）</h1>
+      <p>windows[] 为 embedded 形态声明的专属入口；窗口控制按钮在这里没有意义，关闭由宿主导航完成</p>
+      <div class="row">
+        <button id="log">写日志 / Log</button>
+        <button id="close" title="kapi:window.close → 返回插件列表">关闭页面 / Close</button>
+      </div>
+      <div id="status"></div>
+    </div>
+    <script>
+      // 裸桥接 RPC：与 index.html 同款（@kapi/plugin-sdk 接入后由 SDK 替换，当前刻意重复）
+      // Raw bridge RPC: same as index.html (replaced by @kapi/plugin-sdk later; duplication intended)
+      let seq = 0;
+      const pending = new Map();
+      function call(channel, payload) {
+        return new Promise((resolve, reject) => {
+          const id = ++seq;
+          pending.set(id, { resolve, reject });
+          parent.postMessage({ id, channel, payload }, "*");
+        });
+      }
+      window.addEventListener("message", (e) => {
+        const msg = e.data;
+        if (!msg || typeof msg !== "object" || !pending.has(msg.id)) return;
+        const { resolve, reject } = pending.get(msg.id);
+        pending.delete(msg.id);
+        msg.ok ? resolve(msg.data) : reject(new Error(msg.error || "bridge error"));
+      });
+
+      const status = document.getElementById("status");
+      function report(promise, okText) {
+        promise
+          .then((data) => (status.textContent = okText + (data ? ` · ${JSON.stringify(data)}` : "")))
+          .catch((err) => (status.textContent = String(err.message || err)));
+      }
+
+      // 启动时查询展示环境：内嵌页应得到 mode = embedded（形态与入口一一对应的验证）
+      // Query the display context on load: an embed page expects mode = embedded
+      // (verifying the one-to-one mapping between shape and entry)
+      report(call("kapi:window.getInfo", {}), "getInfo:");
+
+      document.getElementById("log").addEventListener("click", () => {
+        // 经 kapi:log.info 写入 system_logs（主面板日志页可查 source = plugin:<id>）
+        // kapi:log.info appends to system_logs (logs page shows source = plugin:<id>)
+        report(call("kapi:log.info", { message: "hello from plugin C embed", data: { at: "panel" } }), "已写入系统日志 / logged · ");
+      });
+      document.getElementById("close").addEventListener("click", () => {
+        // 内嵌语义的关闭：宿主收到 plugin:close 后返回插件列表（index.html 的关窗走同通道）
+        // Embedded semantics of close: the host returns to the plugin list on plugin:close
+        // (index.html closes its own window through the same channel)
+        report(call("kapi:window.close", {}), "已关闭 / closed · ");
+      });
+    </script>
+  </body>
+</html>

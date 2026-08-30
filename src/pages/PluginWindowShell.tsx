@@ -1,9 +1,10 @@
 // 插件独立窗口壳：/plugin-window/:id（裸 PluginHost，docs/ARCHITECTURE.md §2.2）
 // Plugin independent window shell: /plugin-window/:id (a bare PluginHost)
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PluginHost } from "@/components/plugin/PluginHost";
+import { safeEntry } from "@/lib/plugin-url";
 import { initDb, pluginDb } from "@/lib/db";
 import { isTauri } from "@/lib/tauri";
 
@@ -60,6 +61,11 @@ function useShowWhenReady(enabled: boolean): () => void {
 
 export default function PluginWindowShell() {
   const { id: paramId } = useParams<{ id: string }>();
+  // 形态入口由 Rust 建窗时拼进 ?entry=（create_plugin_window），非法值回退 index.html
+  // The per-shape entry rides ?entry= when Rust creates the window (create_plugin_window);
+  // invalid values fall back to index.html
+  const [searchParams] = useSearchParams();
+  const entry = safeEntry(searchParams.get("entry"));
   // id 权威来源是路由参数（完整插件 id）；label 作回退（其中 "." 已被替换为 "_"，有损）
   // The route param carries the authoritative plugin id; the label is a lossy
   // fallback (its "." chars were replaced with "_" to satisfy Tauri label rules)
@@ -100,7 +106,7 @@ export default function PluginWindowShell() {
 
   return (
     <div className={transparent ? "h-svh w-full" : "h-svh w-full bg-background"}>
-      <PluginHost pluginId={id} onLoaded={markReady} />
+      <PluginHost pluginId={id} entry={entry} onLoaded={markReady} />
     </div>
   );
 }
