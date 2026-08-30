@@ -13,6 +13,7 @@ import type {
   WorkflowStepLog,
   WindowMode,
 } from '@/types'
+import { supportedModes } from '@/lib/plugin-shapes'
 
 let db: Database
 
@@ -35,12 +36,14 @@ export function getDb(): Database {
 // 插件操作 / Plugin operations
 // ============================================================
 
-// plugins 表行 → Plugin（解析 manifest / window_config JSON）
-// plugins row → Plugin (parses manifest / window_config JSON)
+// plugins 表行 → Plugin（解析 manifest / window_config JSON，派生声明形态）
+// plugins row → Plugin (parses manifest / window_config JSON, derives declared shapes)
 function parsePlugin(row: PluginRow): Plugin {
+  const manifest = JSON.parse(row.manifest)
   return {
     ...row,
-    manifest: JSON.parse(row.manifest),
+    manifest,
+    supported_modes: supportedModes(manifest, row.web_path != null, row.wasm_path != null),
     window_config: row.window_config ? JSON.parse(row.window_config) : null,
   }
 }

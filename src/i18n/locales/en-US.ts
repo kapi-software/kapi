@@ -120,6 +120,7 @@ export default {
     modeIndependent: 'Independent',
     modeHeadless: 'Headless',
     modeLocked: 'Plugin window is open; close it before switching modes',
+    modeUnsupported: 'Current mode no longer supported',
     enabled: 'Enabled',
     moveUp: 'Move up',
     moveDown: 'Move down',

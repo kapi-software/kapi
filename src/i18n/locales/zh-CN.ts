@@ -121,6 +121,7 @@ export default {
     modeIndependent: '独立窗口',
     modeHeadless: '无界面',
     modeLocked: '插件窗口运行中，暂不能切换模式 / plugin window is open',
+    modeUnsupported: '当前模式已不再支持 / current mode no longer supported',
     enabled: '启用',
     moveUp: '上移',
     moveDown: '下移',

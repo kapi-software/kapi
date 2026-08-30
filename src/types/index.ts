@@ -82,6 +82,9 @@ export interface Plugin {
   wasm_path: string | null
   web_path: string | null
   window_mode: WindowMode
+  // manifest 声明的可运行形态（展示用，裁决在 Rust launch_plugin）
+  // Declared runnable shapes (display-only; Rust launch_plugin decides)
+  supported_modes: WindowMode[]
   window_config: PluginWindowConfig | null
   is_enabled: boolean
   is_installed: boolean
@@ -90,9 +93,9 @@ export interface Plugin {
   updated_at: string
 }
 
-// plugins 表原始行（manifest / window_config 为 JSON 字符串）
-// Raw plugins row (manifest / window_config as JSON strings)
-export interface PluginRow extends Omit<Plugin, 'manifest' | 'window_config'> {
+// plugins 表原始行（manifest / window_config 为 JSON 字符串，supported_modes 派生不入库）
+// Raw plugins row (manifest / window_config as JSON strings; supported_modes is derived, not stored)
+export interface PluginRow extends Omit<Plugin, 'manifest' | 'window_config' | 'supported_modes'> {
   manifest: string
   window_config: string | null
 }

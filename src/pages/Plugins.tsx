@@ -49,6 +49,13 @@ function PluginCard({
   const { t } = useTranslation();
   const { setEnabled, setWindowMode, move, uninstall } = usePluginsStore();
 
+  // 模式选项 = manifest 声明的形态（Rust 裁决 UnsupportedMode，这里只渲染可选项）；
+  // 当前值若已过期（重装后不再支持）仍保留展示，用户可改选声明形态
+  // Options = the manifest-declared shapes (Rust rules UnsupportedMode; we render only
+  // these) — a stale current value stays visible so the user can pick a declared one
+  const modeOptions = MODE_OPTIONS.filter((o) => plugin.supported_modes.includes(o.value));
+  const staleCurrent = !modeOptions.some((o) => o.value === plugin.window_mode);
+
   const handleLaunch = async () => {
     try {
       await invoke("launch_plugin", { pluginId: plugin.id });
@@ -116,7 +123,12 @@ function PluginCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {MODE_OPTIONS.map(({ value, labelKey }) => (
+              {staleCurrent && (
+                <SelectItem value={plugin.window_mode} disabled>
+                  {t("plugins.modeUnsupported")}
+                </SelectItem>
+              )}
+              {modeOptions.map(({ value, labelKey }) => (
                 <SelectItem key={value} value={value}>
                   {t(labelKey)}
                 </SelectItem>
