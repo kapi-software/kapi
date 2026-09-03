@@ -2,13 +2,13 @@
 // Kapi app entry: plugin registration, DB migrations, protocol, commands, dock service, system tray
 mod db;
 mod dock;
-mod plugin_bridge;
-mod plugin_manager;
+pub mod bridge;
+pub mod plugin;
 mod plugin_protocol;
 mod store;
 mod tray;
-mod wasm_runtime;
-mod workflow_engine;
+pub mod wasm;
+pub mod workflow;
 
 use std::sync::{Arc, Mutex};
 
@@ -40,7 +40,7 @@ pub fn run() {
         .manage(tray::TrayState::default())
         // WASM 运行时：wasmtime 沙箱 + 模块缓存 + epoch ticker（docs/PLUGINS.md §5）
         // WASM runtime: the wasmtime sandbox, module cache and epoch ticker
-        .manage(wasm_runtime::WasmRuntime::new())
+        .manage(crate::wasm::engine::WasmRuntime::new())
         // kapi-plugin:// 协议：插件 web/ 静态资源服务（docs/ARCHITECTURE.md §3.4）
         // kapi-plugin:// protocol: plugin web/ static asset serving (docs/ARCHITECTURE.md §3.4)
         .register_uri_scheme_protocol(plugin_protocol::SCHEME, |ctx, request| {
@@ -48,23 +48,23 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dock::dock_set_config,
-            plugin_bridge::plugin_bridge,
-            plugin_manager::plugin_install,
-            plugin_manager::plugin_uninstall,
-            plugin_manager::launch_plugin,
+            bridge::dispatch::plugin_bridge,
+            plugin::install::plugin_install,
+            plugin::install::plugin_uninstall,
+            plugin::launch::launch_plugin,
             store::store_list,
             store::store_install,
             tray::tray_set_language,
-            workflow_engine::workflow_execute,
-            workflow_engine::workflow_get,
-            workflow_engine::workflow_list,
-            workflow_engine::workflow_save,
-            workflow_engine::workflow_delete,
-            workflow_engine::workflow_runs,
-            workflow_engine::workflow_run_steps,
-            workflow_engine::trigger_save,
-            workflow_engine::trigger_delete,
-            workflow_engine::trigger_list
+            workflow::commands::workflow_execute,
+            workflow::commands::workflow_get,
+            workflow::commands::workflow_list,
+            workflow::commands::workflow_save,
+            workflow::commands::workflow_delete,
+            workflow::commands::workflow_runs,
+            workflow::commands::workflow_run_steps,
+            workflow::commands::trigger_save,
+            workflow::commands::trigger_delete,
+            workflow::commands::trigger_list
         ])
         // 主窗口关闭 = 隐藏驻留托盘，退出仅走托盘菜单；独立插件窗口销毁时清理事件订阅
         // Closing the main window hides it to the tray; a destroyed plugin window purges
@@ -78,7 +78,7 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
-                    plugin_bridge::event_purge_window(window.label());
+                    bridge::event_bus::event_purge_window(window.label());
                 }
                 _ => {}
             }
@@ -86,7 +86,7 @@ pub fn run() {
         .setup(|app| {
             // 事件推送总线：注入宿主句柄（events.emit 扇出用）
             // Event push bus: inject the host handle (used by the events.emit fan-out)
-            plugin_bridge::init_event_bus(app.handle().clone());
+            bridge::event_bus::init_event_bus(app.handle().clone());
             // 工作流引擎：setup 阶段直接新建一个 SQLite 池，与 plugin-sql 共用同一 DB 文件
             // Workflow engine: open a dedicated SQLite pool during setup (same DB file as plugin-sql)
             // plugin-sql 的 DbInstances 仅在 load 命令被前端调用后才填池（lazy 模式）
@@ -94,22 +94,22 @@ pub fn run() {
             // 工作流命令路径无需等前端 load，因此这里直接连 + apply migrations
             // The workflow command path doesn't wait for the frontend load; connect + migrate here
             let wasm = Arc::new(
-                app.state::<wasm_runtime::WasmRuntime>()
+                app.state::<crate::wasm::engine::WasmRuntime>()
                     .inner()
                     .clone(),
             );
             let app_handle = app.handle().clone();
             let pool_for_engine = tauri::async_runtime::block_on(async move {
-                workflow_engine::open_pool_with_migrations(&app_handle).await
+                workflow::db::open_pool_with_migrations(&app_handle).await
             })?;
-            app.manage(Arc::new(workflow_engine::WorkflowEngine::new(
+            app.manage(Arc::new(workflow::engine::WorkflowEngine::new(
                 wasm, // Arc<WasmRuntime>
                 pool_for_engine,
             )));
             // 启动已持久化的触发器（schedule / plugin_event / clipboard / hotkey）
             // Start persisted triggers (schedule / plugin_event / clipboard / hotkey)
             let engine = app
-                .state::<Arc<workflow_engine::WorkflowEngine>>()
+                .state::<Arc<workflow::engine::WorkflowEngine>>()
                 .inner()
                 .clone();
             let app_for_triggers = app.handle().clone();

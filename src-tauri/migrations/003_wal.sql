@@ -1,6 +1,6 @@
 -- ============================================================
--- 003_wal.sql  启用 WAL 日志模式（修复并发写 "database is locked"）
--- Enable WAL journal mode (fixes concurrent-write "database is locked")
+-- 003_wal.sql  启用 WAL 日志模式（对应 docs/DATABASE.md）
+-- Enable WAL journal mode (docs/DATABASE.md)
 -- 背景：Rust 桥接（宿主导入写日志 / headless 落库 / wasm invoke 上下文查询）
 -- 与前端（日志页轮询、设置写入、插件列表）在同一 SQLite 文件上并发访问；
 -- 默认 DELETE 日志模式下写锁排斥读锁，超时即报 code 5。
@@ -8,14 +8,23 @@
 -- context queries) and the frontend (log polling, settings writes, plugin
 -- lists) share one SQLite file; the default DELETE journal lets a writer
 -- block all readers, surfacing as busy code 5 after the timeout.
--- WAL 允许读写并行（journal_mode 持久存于库文件，对新连接同样生效）；
--- synchronous=NORMAL 为 WAL 的推荐搭配（仅断电可能丢最后一次 checkpoint，
--- 不损坏库文件）。
--- WAL lets reads and writes proceed concurrently (the mode persists in the
--- database file, so new connections inherit it); synchronous=NORMAL is the
--- recommended WAL pairing (a power loss may drop the last checkpoint only,
--- never corrupting the file).
+--
+-- 实现说明：SQLite 禁止在事务内修改 journal_mode / synchronous，而 sqlx 的
+-- Migrator 对每条迁移无条件包事务——PRAGMA 写在迁移里永远无法落库（本版本
+-- 长期卡在这一步，连带 004 未执行、workflow_triggers 缺表）。
+-- Implementation note: SQLite forbids changing journal_mode / synchronous
+-- inside a transaction, yet the sqlx Migrator unconditionally wraps each
+-- migration in one — a PRAGMA inside a migration can never apply (this
+-- version was stuck here, leaving 004 unapplied and workflow_triggers
+-- missing).
+--
+-- 因此 WAL 改由宿主在建立连接时设置（SqliteConnectOptions：
+-- journal_mode=Wal + synchronous=NORMAL）；journal_mode 持久化进库文件，
+-- 所有后续连接（含前端 plugin-sql 池）自动继承。本迁移保留为版本占位。
+-- WAL is therefore set by the host at connection setup (SqliteConnectOptions:
+-- journal_mode=Wal + synchronous=NORMAL); the mode persists in the DB file,
+-- inherited by every later connection (including the frontend plugin-sql
+-- pool). This migration remains only as a version placeholder.
 -- ============================================================
 
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+SELECT 1;

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use tauri::AppHandle;
 
-use crate::plugin_manager::install_from_dir;
+use crate::plugin::install::install_from_dir;
 
 // 市场边界：目录数 / zip 条目数 / 解压总量 / 下载体大小（防滥用与 zip 炸弹）
 // Store bounds: dir count / zip entry count / total uncompressed size / download cap
@@ -153,7 +153,7 @@ async fn write_index_cache(pool: &sqlx::SqlitePool, body: &str) -> Result<(), St
 // refresh=true forces a refetch and updates the cache
 #[tauri::command]
 pub async fn store_list(app: AppHandle, refresh: bool) -> Result<Value, String> {
-    let pool = crate::plugin_manager::sqlite_pool(&app).await?;
+    let pool = crate::plugin::pool::sqlite_pool(&app).await?;
 
     if !refresh {
         if let Some(cached) = read_index_cache(&pool).await? {
