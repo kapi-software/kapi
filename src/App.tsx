@@ -14,7 +14,7 @@ import i18n from "@/i18n";
 import { useSettingsStore } from "@/stores/settings";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/navigation/AppSidebar";
-import { TopBar } from "@/components/navigation/TopBar";
+import { TopBar, HEADER_HEIGHT } from "@/components/navigation/TopBar";
 import DockApp from "@/dock/Dock";
 import Dashboard from "@/pages/Dashboard";
 import Plugins from "@/pages/Plugins";
@@ -83,9 +83,9 @@ function PanelLayout() {
       className="flex h-svh flex-col"
       style={
         {
-          // 顶栏高度 36px（更紧凑）
-          // Header height 36px (more compact)
-          "--header-height": "2.25rem",
+          // 顶栏高度与 StandaloneLayout 共用同一常量，保证两种布局一致
+          // Header height shares the constant with StandaloneLayout for consistency
+          "--header-height": HEADER_HEIGHT,
           "--sidebar-width": "12rem",
           "--sidebar-width-icon": "3rem",
         } as CSSProperties

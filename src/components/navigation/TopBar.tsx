@@ -14,6 +14,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SidebarContext } from "@/components/ui/sidebar";
 
+// 顶栏高度常量：PanelLayout 与 StandaloneLayout 必须共用同一值，
+// 否则 TopBar 的 h-(--header-height) 在未设置该变量的布局下高度塌陷
+// Header height constant: both layouts must share the same value, otherwise
+// TopBar's h-(--header-height) collapses where the variable is unset
+export const HEADER_HEIGHT = "2.25rem";
+
 // 窗口控制按钮组（仅 Tauri 环境渲染）
 // Window control buttons (rendered only inside Tauri)
 // 阻止事件冒泡，避免触发外层 data-tauri-drag-region 的拖拽
