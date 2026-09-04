@@ -69,11 +69,16 @@ function isStructuredAction(action: { inputs?: Record<string, unknown>; outputs?
 
 // WorkflowNode → React Flow Node（仅追加 data，不改 position）
 // WorkflowNode → React Flow Node (appends data, doesn't move position)
+// P5: display_name 透传
+// P5: display_name passthrough
 function graphNodeToRfNode(n: WorkflowNode, pos?: { x: number; y: number }): Node {
   return {
     id: n.id,
     type: n.type,
-    position: pos ?? { x: 0, y: 0 },
+    // P-∞: 位置直接引用（避免 position.newObj !== prevNode.position 的浅比等问题）
+    // Position is passed by reference to avoid shallow inequality in setGraph checks.
+    // Persistent position changes are handled by the drag callback (onNodesChange).
+    position: pos ?? n.position,
     data: {
       type: n.type,
       plugin_id: n.plugin_id ?? "",
@@ -94,12 +99,17 @@ function graphToRfState(graph: WorkflowGraph): { initNodes: Node[]; initEdges: E
   // 用网格布局给节点分配位置（仅在无 position 时使用）
   // Assign positions using a simple grid layout (only when no position is stored)
   const COLS = 3;
-  const initNodes: Node[] = graph.nodes.map((n, i) =>
-    graphNodeToRfNode(n, {
-      x: n.position?.x ?? (i % COLS) * 280,
-      y: n.position?.y ?? Math.floor(i / COLS) * 120,
-    }),
-  );
+  const initNodes: Node[] = graph.nodes.map((n, i) => {
+    // 有持久化位置：直接用；没有：造新网格位置
+    // If persisted position exists: use it; otherwise: create new grid position
+    if (n.position) {
+      return graphNodeToRfNode(n);
+    }
+    return graphNodeToRfNode(n, {
+      x: (i % COLS) * 280,
+      y: Math.floor(i / COLS) * 120,
+    });
+  });
   // P1：加载已保存工作流时反序列化 edge.map
   // P1: deserialize edge.map when loading saved workflow
   const initEdges: Edge[] = graph.edges.map((e, i) => ({
