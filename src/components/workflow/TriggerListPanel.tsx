@@ -5,6 +5,7 @@ import { Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useTriggersStore } from "@/stores/triggers";
+import { summarizeTriggerConfig } from "@/lib/workflow-labels";
 import type { WorkflowTrigger, TriggerType } from "@/types";
 
 const TRIGGER_LABELS: Record<TriggerType, string> = {
@@ -90,7 +91,7 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
                 {TRIGGER_LABELS[t.trigger_type] ?? t.trigger_type}
               </Badge>
               <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">
-                {JSON.stringify(t.config)}
+                {summarizeTriggerConfig(t.config as Record<string, unknown>)}
               </span>
               {!t.is_enabled && (
                 <span className="shrink-0 text-[9px] text-muted-foreground">已停用</span>
@@ -124,7 +125,7 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
           <div className="w-80 space-y-3 rounded-lg border bg-card p-4">
             <p className="text-sm font-medium">删除触发器？</p>
             <p className="text-xs text-muted-foreground">
-              {TRIGGER_LABELS[pendingDelete.trigger_type]} - {JSON.stringify(pendingDelete.config)}
+              {TRIGGER_LABELS[pendingDelete.trigger_type]} - {summarizeTriggerConfig(pendingDelete.config as Record<string, unknown>)}
             </p>
             <div className="flex justify-end gap-2">
               <Button
