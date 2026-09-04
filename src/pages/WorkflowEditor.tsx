@@ -200,18 +200,26 @@ export default function WorkflowEditor() {
   }, [nodes, edges, graph.bindings]);
   const hasFatal = hasFatalErrors(validationErrors);
 
-  // 同步 store graph → React Flow（load 完成后用最新 graph 全量替换）
-  // Sync store graph → React Flow (full replace after the loader effect sets graph)
-  // 之前是单向 nodes→graph，导致打开已保存工作流时画布空白 + 编辑后保存覆盖原图。
-  // Previously one-way nodes→graph; opening a saved workflow left the canvas blank and saving overwrote the original.
-  // P-∞：用 ref 记录"上一帧的 graph 引用"，只有外部 graph 变化才同步到 React Flow，
-  // 防止 setNodes → useEffect([nodes]) → setGraph → useEffect([graph]) → setNodes 死循环
-  // P-∞: use a ref to track the last graph reference; only sync to React Flow when
-  // graph changes from the outside, breaking the potential setNodes → nodes→graph → graph → setNodes cycle
+  // 同步 store graph → React Flow：只在**外部** graph 改变时同步（如 store load 完）
+  // Sync store graph → React Flow: only on EXTERNAL graph changes
+  // （如打开已有工作流、模板预填）
+  // 用户显式操作（onDrop / onConnect / updateSelectedNode）已直接更新 graph state，
+  // 不再需要从 React Flow 同步到 graph（避免死循环与覆盖用户编辑）
+  // User actions (onDrop / onConnect / updateSelectedNode) already write to
+  // graph state; syncing back from React Flow would overwrite edits.
+  // 关键：line 213-215 的 setNodes(initNodes) 会用 stale initNodes 覆盖用户编辑，必须禁掉
+  // Critical: the setNodes(initNodes) below would overwrite user edits; we skip it.
   const lastGraphRef = useRef<WorkflowGraph | null>(null)
   useEffect(() => {
     if (lastGraphRef.current === graph) return
     lastGraphRef.current = graph
+    // P-∞: 检测 React Flow 内部是否已经有 graph 之外的节点（用户已添加的）
+    // Detect if React Flow already has nodes beyond what's in graph (user-added)
+    const userAdded = nodes.length > graph.nodes.length
+    if (userAdded) {
+      // 不覆盖用户编辑 / Don't overwrite user edits
+      return
+    }
     setNodes(initNodes)
     setEdges(initEdges)
     // eslint-disable-next-line react-hooks/exhaustive-deps
