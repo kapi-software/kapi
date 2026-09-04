@@ -39,11 +39,22 @@ interface Props {
   trigger?: WorkflowTrigger | null;
 }
 
-const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
-  { value: "schedule", label: "定时" },
-  { value: "plugin_event", label: "插件事件" },
-  { value: "clipboard", label: "剪贴板" },
-  { value: "hotkey", label: "快捷键" },
+const TRIGGER_OPTIONS: { value: TriggerType; label: string; available: boolean }[] = [
+  { value: "schedule", label: "定时", available: true },
+  { value: "plugin_event", label: "插件事件", available: true },
+  { value: "clipboard", label: "剪贴板（开发中）", available: false },
+  { value: "hotkey", label: "快捷键（开发中）", available: false },
+];
+
+// P3：人类语言生成器预设
+// P3: human-language cron presets
+const CRON_PRESETS: { label: string; cron: string }[] = [
+  { label: "每 5 分钟", cron: "*/5 * * * *" },
+  { label: "每小时整点", cron: "0 * * * *" },
+  { label: "每天 9:00", cron: "0 9 * * *" },
+  { label: "每天 18:00", cron: "0 18 * * *" },
+  { label: "每周一早 8:00", cron: "0 8 * * 1" },
+  { label: "每月 1 日 0:00", cron: "0 0 1 * *" },
 ];
 
 export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props) {
@@ -54,8 +65,9 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
   const [historyEvents, setHistoryEvents] = useState<string[]>([]);
   const [triggerType, setTriggerType] = useState<TriggerType>("schedule");
   const [isEnabled, setIsEnabled] = useState(true);
-  // 各类型配置
-  const [intervalSeconds, setIntervalSeconds] = useState(60);
+  // P3 (A4): schedule 改用 cron 字符串
+  // P3 (A4): schedule uses cron expression
+  const [cron, setCron] = useState("0 * * * *");
   const [eventType, setEventType] = useState("");
   const [pattern, setPattern] = useState("");
   const [shortcut, setShortcut] = useState("CmdOrCtrl+Shift+K");
@@ -68,7 +80,17 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
       setIsEnabled(trigger.is_enabled);
       const cfg = trigger.config as Record<string, unknown>;
       if (trigger.trigger_type === "schedule") {
-        setIntervalSeconds((cfg.interval_seconds as number) ?? 60);
+        // 向后兼容：老数据用 interval_seconds
+        // Backward-compat: legacy data uses interval_seconds
+        const legacySec = cfg.interval_seconds as number | undefined
+        if (legacySec && !cfg.cron) {
+          // 大致转换：60s → "*/1 * * * *"
+          // Rough conversion: 60s → "*/1 * * * *"
+          const minutes = Math.max(1, Math.round(legacySec / 60))
+          setCron(minutes < 60 ? `*/${minutes} * * * *` : "0 * * * *")
+        } else {
+          setCron((cfg.cron as string) ?? "0 * * * *")
+        }
       } else if (trigger.trigger_type === "plugin_event") {
         setEventType((cfg.event_type as string) ?? "");
       } else if (trigger.trigger_type === "clipboard") {
@@ -79,7 +101,7 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
     } else {
       setTriggerType("schedule");
       setIsEnabled(true);
-      setIntervalSeconds(60);
+      setCron("0 * * * *");
       setEventType("");
       setPattern("");
       setShortcut("CmdOrCtrl+Shift+K");
@@ -119,7 +141,9 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
     try {
       let config: Record<string, unknown> = {};
       if (triggerType === "schedule") {
-        config = { interval_seconds: intervalSeconds };
+        // P3 (A4): 存 cron 字符串，不再存 interval_seconds
+        // P3 (A4): store cron string, no longer interval_seconds
+        config = { cron };
       } else if (triggerType === "plugin_event") {
         config = { event_type: eventType };
       } else if (triggerType === "clipboard") {
@@ -161,25 +185,50 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
               </SelectTrigger>
               <SelectContent>
                 {TRIGGER_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    disabled={!opt.available}
+                    className="text-xs"
+                  >
                     {opt.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-[10px] text-muted-foreground/70">
+              标"开发中"的触发器：UI 可选，后端暂未接线，配置后不会触发
+            </p>
           </div>
 
           {/* 类型特定配置 */}
           {triggerType === "schedule" && (
             <div className="space-y-1.5">
-              <Label className="text-xs">间隔（秒）</Label>
+              <Label className="text-xs">cron 表达式（5 字段：分 时 日 月 周）</Label>
               <Input
-                type="number"
-                min={1}
-                className="h-8 text-xs"
-                value={intervalSeconds}
-                onChange={(e) => setIntervalSeconds(parseInt(e.target.value) || 60)}
+                className="h-8 font-mono text-xs"
+                value={cron}
+                onChange={(e) => setCron(e.target.value)}
+                placeholder="0 9 * * *"
+                spellCheck={false}
               />
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {CRON_PRESETS.map((p) => (
+                  <Button
+                    key={p.cron}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[10px]"
+                    onClick={() => setCron(p.cron)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground/70">
+                支持 * , - / 字符。例：每5分钟 <code>*/5 * * * *</code> · 每周一早8点 <code>0 8 * * 1</code>
+              </p>
             </div>
           )}
 
@@ -241,24 +290,32 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
 
           {triggerType === "clipboard" && (
             <div className="space-y-1.5">
+              <div className="rounded border border-yellow-500/50 bg-yellow-500/10 p-2 text-[11px] text-yellow-700 dark:text-yellow-400">
+                ⚠ 剪贴板触发器尚未接线后端，配置后不会触发。
+              </div>
               <Label className="text-xs">正则匹配（可选）</Label>
               <Input
                 className="h-8 text-xs"
                 value={pattern}
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder="留空则任何变化都触发"
+                disabled
               />
             </div>
           )}
 
           {triggerType === "hotkey" && (
             <div className="space-y-1.5">
+              <div className="rounded border border-yellow-500/50 bg-yellow-500/10 p-2 text-[11px] text-yellow-700 dark:text-yellow-400">
+                ⚠ 快捷键触发器尚未接线后端，配置后不会触发。
+              </div>
               <Label className="text-xs">快捷键</Label>
               <Input
                 className="h-8 text-xs"
                 value={shortcut}
                 onChange={(e) => setShortcut(e.target.value)}
                 placeholder="CmdOrCtrl+Shift+K"
+                disabled
               />
               <p className="text-[10px] text-muted-foreground">
                 格式：CmdOrCtrl / Alt / Shift / Super + 字母/数字

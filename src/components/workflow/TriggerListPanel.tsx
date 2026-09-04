@@ -65,7 +65,7 @@ export function TriggerListPanel({ workflowId, onEdit }: Props) {
             id: "",
             workflow_id: workflowId,
             trigger_type: "schedule",
-            config: { interval_seconds: 60 },
+            config: { cron: "0 * * * *" },
             is_enabled: true,
           })}
         >

@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::bridge::log::write_system_log;
 use crate::workflow::model::{
-    NodeOutcome, RunOutcome, TriggerEntry, TriggerType, Workflow, WorkflowContext,
+    CronSchedule, NodeOutcome, RunOutcome, TriggerEntry, TriggerType, Workflow, WorkflowContext,
     WorkflowGraph, WorkflowRun, WorkflowTrigger,
 };
 use crate::workflow::node::run_node;
@@ -384,28 +384,54 @@ fn snapshot_outputs(src: &HashMap<String, Value>) -> HashMap<String, Value> {
 // a trigger↔engine cycle
 // ============================================================
 
-/// Schedule 触发器：定时执行工作流
-/// Schedule trigger: execute workflow periodically
+/// Schedule 触发器：按 cron 表达式定时执行工作流
+/// Schedule trigger: execute workflow per cron expression
 fn spawn_schedule_trigger(
     app: AppHandle,
     workflow_id: String,
     config: Value,
     cancel: CancellationToken,
 ) -> JoinHandle<()> {
-    let interval_secs = config
-        .get("interval_seconds")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(60) as u64;
+    // P3 (A4): 用 cron 字符串代替 interval_seconds
+    // P3 (A4): use cron expression instead of interval_seconds
+    let cron_str = config
+        .get("cron")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0 * * * *"); // 默认：每小时整点
+    let schedule: CronSchedule = match cron_str.parse() {
+        Ok(s) => s,
+        Err(e) => {
+            // 错误 cron 表达式：记录后用 1 小时兜底，避免完全无响应
+            eprintln!("[workflow] invalid cron '{cron_str}': {e}; using fallback");
+            // 兜底：每小时整点
+            "0 * * * *".parse().unwrap()
+        }
+    };
     let workflow_id = workflow_id;
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
-        // 跳过首次立即 tick：tokio::interval 的第一个 tick 总是立即触发，需要显式跳过
-        // Skip first immediate tick: tokio::interval fires immediately on the first tick
-        interval.tick().await;
         loop {
+            // 计算下一次匹配秒数
+            // Compute next matching instant
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let next_secs = match schedule.next_utc_seconds(now_secs) {
+                Some(s) => s,
+                None => {
+                    // 找不到匹配（表达式无解），1 小时后重试
+                    eprintln!("[workflow] no matching time for cron; retry in 1h");
+                    let sleep_dur = Duration::from_secs(3600);
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = tokio::time::sleep(sleep_dur) => continue,
+                    }
+                }
+            };
+            let wait = (next_secs - now_secs).max(1) as u64;
             tokio::select! {
                 _ = cancel.cancelled() => break,
-                _ = interval.tick() => {
+                _ = tokio::time::sleep(Duration::from_secs(wait)) => {
                     let engine = match WorkflowEngine::from_app(&app) {
                         Ok(e) => e,
                         Err(_) => break,
