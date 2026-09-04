@@ -14,6 +14,8 @@ use crate::wasm::engine::WasmRuntime;
 /// Execute a single node (plugin or transform)
 /// `edge_map` 是从 graph 中筛出指向本节点的边，map 字段形如 { upstream_output: downstream_input }
 /// `edge_map` is the subset of edges that point to this node; map fields are { upstream_output: downstream_input }
+/// `dry_run: true` 时跳过 step_log 的所有 SQL 写入（仅返回 NodeOutcome）
+/// `dry_run: true` skips all step_log SQL writes (returns NodeOutcome only)
 pub async fn run_node(
     run_id: i64,
     node: WorkflowNode,
@@ -23,32 +25,52 @@ pub async fn run_node(
     wasm: &WasmRuntime,
     pool: &SqlitePool,
     handlebars: &Arc<Handlebars<'_>>,
+    dry_run: bool,
 ) -> NodeOutcome {
     let step_id = node.id.clone();
 
     // Transform 节点：Handlebars 模板渲染
     // Transform node: Handlebars template rendering
     if node.node_type == "transform" {
-        return run_transform_node(run_id, &node, &edge_map, &prior_outputs, &trigger_data, pool, handlebars).await;
+        return run_transform_node(
+            run_id, &node, &edge_map, &prior_outputs, &trigger_data, pool, handlebars, dry_run,
+        )
+        .await;
     }
 
     // Plugin 节点
     let plugin_id = match &node.plugin_id {
         Some(p) => p.clone(),
         None => {
-            record_step_failure(pool, run_id, &node, "InvalidNode: missing plugin_id").await;
+            if !dry_run {
+                record_step_failure(pool, run_id, &node, "InvalidNode: missing plugin_id").await;
+            }
             return NodeOutcome::Failure { node_id: step_id, error: "InvalidNode: missing plugin_id".into() };
         }
     };
     let action = match &node.action {
         Some(a) => a.clone(),
         None => {
-            record_step_failure(pool, run_id, &node, "InvalidNode: missing action").await;
+            if !dry_run {
+                record_step_failure(pool, run_id, &node, "InvalidNode: missing action").await;
+            }
             return NodeOutcome::Failure { node_id: step_id, error: "InvalidNode: missing action".into() };
         }
     };
 
     let input = assemble_input(&edge_map, &prior_outputs, &trigger_data, &node.config);
+
+    if dry_run {
+        // Dry-run: invoke WASM 但不写 step_log，直接返回 outcome
+        // Dry-run: invoke WASM but skip step_log writes
+        let started = std::time::Instant::now();
+        let outcome = wasm.invoke_action(pool, &plugin_id, &action, &input).await;
+        let _duration_ms = started.elapsed().as_millis() as i64;
+        return match outcome {
+            Ok(output) => NodeOutcome::Success { node_id: step_id, output },
+            Err(e) => NodeOutcome::Failure { node_id: step_id, error: e },
+        };
+    }
 
     // INSERT step_log(running)
     let step_log_id = match sqlx::query(
@@ -107,6 +129,7 @@ async fn run_transform_node(
     trigger_data: &Value,
     pool: &SqlitePool,
     handlebars: &Arc<Handlebars<'_>>,
+    dry_run: bool,
 ) -> NodeOutcome {
     let step_id = &node.id;
     let template = node
@@ -119,9 +142,9 @@ async fn run_transform_node(
     let context = assemble_input(edge_map, prior_outputs, trigger_data, &node.config);
 
     match handlebars.render_template(template, &context) {
-        Ok(rendered) => {
-            match serde_json::from_str::<Value>(&rendered) {
-                Ok(output) => {
+        Ok(rendered) => match serde_json::from_str::<Value>(&rendered) {
+            Ok(output) => {
+                if !dry_run {
                     let output_str = serde_json::to_string(&output).unwrap_or_else(|_| "null".into());
                     let _ = sqlx::query(
                         "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, output)
@@ -134,9 +157,11 @@ async fn run_transform_node(
                     .bind(&output_str)
                     .execute(pool)
                     .await;
-                    NodeOutcome::Success { node_id: step_id.clone(), output }
                 }
-                Err(e) => {
+                NodeOutcome::Success { node_id: step_id.clone(), output }
+            }
+            Err(e) => {
+                if !dry_run {
                     let _ = sqlx::query(
                         "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
                          VALUES (?, ?, ?, ?, 'failed', ?)",
@@ -148,25 +173,27 @@ async fn run_transform_node(
                     .bind(format!("TemplateRenderError: {e}"))
                     .execute(pool)
                     .await;
-                    NodeOutcome::Failure {
-                        node_id: step_id.clone(),
-                        error: format!("TransformError: template output is not valid JSON: {e}"),
-                    }
+                }
+                NodeOutcome::Failure {
+                    node_id: step_id.clone(),
+                    error: format!("TransformError: template output is not valid JSON: {e}"),
                 }
             }
-        }
+        },
         Err(e) => {
-            let _ = sqlx::query(
-                "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
-                 VALUES (?, ?, ?, ?, 'failed', ?)",
-            )
-            .bind(run_id)
-            .bind(step_id)
-            .bind(node.plugin_id.as_deref())
-            .bind(node.action.as_deref())
-            .bind(format!("HandlebarsError: {e}"))
-            .execute(pool)
-            .await;
+            if !dry_run {
+                let _ = sqlx::query(
+                    "INSERT INTO workflow_step_logs (run_id, step_id, plugin_id, action, status, error)
+                     VALUES (?, ?, ?, ?, 'failed', ?)",
+                )
+                .bind(run_id)
+                .bind(step_id)
+                .bind(node.plugin_id.as_deref())
+                .bind(node.action.as_deref())
+                .bind(format!("HandlebarsError: {e}"))
+                .execute(pool)
+                .await;
+            }
             NodeOutcome::Failure { node_id: step_id.clone(), error: format!("TransformError: {e}") }
         }
     }

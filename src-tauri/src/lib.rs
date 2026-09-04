@@ -56,7 +56,7 @@ pub fn run() {
             store::store_list,
             store::store_install,
             tray::tray_set_language,
-            workflow::commands::workflow_execute,
+            workflow::commands::workflow_execute, 
             workflow::commands::workflow_get,
             workflow::commands::workflow_list,
             workflow::commands::workflow_save,
@@ -64,6 +64,8 @@ pub fn run() {
             workflow::commands::workflow_runs,
             workflow::commands::workflow_run_steps,
             workflow::commands::workflow_validate,
+            workflow::commands::workflow_cancel,
+            workflow::commands::workflow_dry_run,
             workflow::commands::trigger_save,
             workflow::commands::trigger_delete,
             workflow::commands::trigger_list

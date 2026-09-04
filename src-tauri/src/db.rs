@@ -33,6 +33,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/004_workflow_triggers.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "trigger cursors (plugin_event last_event_id persistence)",
+            sql: include_str!("../migrations/005_trigger_cursors.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

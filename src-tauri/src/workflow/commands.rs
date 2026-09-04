@@ -7,7 +7,7 @@
 // {code, message, kind} for the frontend); `?` converts internal `String` errors.
 use std::sync::Arc;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::error::{AppError, CmdResult};
@@ -131,4 +131,27 @@ pub async fn trigger_list(
 ) -> CmdResult<Vec<WorkflowTrigger>> {
     let pool = sqlite_pool(&app).await?;
     Ok(db::trigger_list(&pool, workflow_id.as_deref()).await?)
+}
+
+/// B6：取消正在运行的 run
+/// B6: cancel a running run
+#[tauri::command]
+pub async fn workflow_cancel(app: AppHandle, run_id: String) -> CmdResult<()> {
+    let engine = WorkflowEngine::from_app(&app)?;
+    engine.cancel_run(&run_id).await?;
+    Ok(())
+}
+
+/// P4：试运行 — 跑一次但**不落库**；返回每步 input/output
+/// P4: dry-run — execute but skip DB writes; return per-step input/output
+#[tauri::command]
+pub async fn workflow_dry_run(
+    app: AppHandle,
+    workflow: Workflow,
+    trigger_data: Option<Value>,
+) -> CmdResult<Vec<WorkflowStepLog>> {
+    let (engine, _) = engine_from_app(&app).await?;
+    Ok(engine
+        .dry_run_execute(&workflow, trigger_data.unwrap_or_else(|| json!({})))
+        .await?)
 }
