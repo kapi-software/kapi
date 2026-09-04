@@ -42,8 +42,8 @@ interface Props {
 const TRIGGER_OPTIONS: { value: TriggerType; label: string; available: boolean }[] = [
   { value: "schedule", label: "定时", available: true },
   { value: "plugin_event", label: "插件事件", available: true },
-  { value: "clipboard", label: "剪贴板（开发中）", available: false },
-  { value: "hotkey", label: "快捷键（开发中）", available: false },
+  { value: "clipboard", label: "剪贴板", available: true },
+  { value: "hotkey", label: "快捷键", available: true },
 ];
 
 // P3：人类语言生成器预设
@@ -197,7 +197,7 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
               </SelectContent>
             </Select>
             <p className="text-[10px] text-muted-foreground/70">
-              标"开发中"的触发器：UI 可选，后端暂未接线，配置后不会触发
+              提示：剪贴板每 500ms 轮询变化；快捷键支持 CmdOrCtrl/Alt/Shift + 字母/数字
             </p>
           </div>
 
@@ -290,32 +290,24 @@ export function TriggerDialog({ open, onOpenChange, workflowId, trigger }: Props
 
           {triggerType === "clipboard" && (
             <div className="space-y-1.5">
-              <div className="rounded border border-yellow-500/50 bg-yellow-500/10 p-2 text-[11px] text-yellow-700 dark:text-yellow-400">
-                ⚠ 剪贴板触发器尚未接线后端，配置后不会触发。
-              </div>
               <Label className="text-xs">正则匹配（可选）</Label>
               <Input
                 className="h-8 text-xs"
                 value={pattern}
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder="留空则任何变化都触发"
-                disabled
               />
             </div>
           )}
 
           {triggerType === "hotkey" && (
             <div className="space-y-1.5">
-              <div className="rounded border border-yellow-500/50 bg-yellow-500/10 p-2 text-[11px] text-yellow-700 dark:text-yellow-400">
-                ⚠ 快捷键触发器尚未接线后端，配置后不会触发。
-              </div>
               <Label className="text-xs">快捷键</Label>
               <Input
                 className="h-8 text-xs"
                 value={shortcut}
                 onChange={(e) => setShortcut(e.target.value)}
                 placeholder="CmdOrCtrl+Shift+K"
-                disabled
               />
               <p className="text-[10px] text-muted-foreground">
                 格式：CmdOrCtrl / Alt / Shift / Super + 字母/数字
