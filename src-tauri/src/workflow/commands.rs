@@ -8,7 +8,8 @@ use tauri::AppHandle;
 use crate::plugin::pool::sqlite_pool;
 use crate::workflow::db::{self};
 use crate::workflow::engine::WorkflowEngine;
-use crate::workflow::model::{TriggerType, Workflow, WorkflowRun, WorkflowStepLog, WorkflowTrigger};
+use crate::workflow::model::{TriggerType, ValidationReport, Workflow, WorkflowRun, WorkflowStepLog, WorkflowTrigger};
+use crate::workflow::topo::validate_graph;
 
 pub async fn engine_from_app(app: &AppHandle) -> Result<(Arc<WorkflowEngine>, sqlx::SqlitePool), String> {
     let pool = sqlite_pool(app).await?;
@@ -39,6 +40,12 @@ pub async fn workflow_list(app: AppHandle) -> Result<Vec<Workflow>, String> {
 
 #[tauri::command]
 pub async fn workflow_save(app: AppHandle, workflow: Workflow) -> Result<(), String> {
+    // 权威校验：保存时再次跑 validate_graph，fatal 错误直接拒绝入库
+    // Authoritative validation: re-run validate_graph on save; reject fatal errors
+    let report = validate_graph(&workflow.graph);
+    if let Some(fatal) = report.iter().find(|e| matches!(e.kind, crate::workflow::model::GraphErrorKind::Fatal)) {
+        return Err(format!("InvalidGraph: {}", fatal.message));
+    }
     let pool = sqlite_pool(&app).await?;
     db::workflow_save(&pool, &workflow).await
 }
@@ -64,6 +71,15 @@ pub async fn workflow_runs(
 ) -> Result<Vec<WorkflowRun>, String> {
     let pool = sqlite_pool(&app).await?;
     db::workflow_runs(&pool, &workflow_id, limit.unwrap_or(20).clamp(1, 200)).await
+}
+
+/// 校验工作流图（环/悬空/重复 id 等）
+/// Validate a workflow graph (cycles, dangling edges, duplicate ids, etc.)
+/// 实时调用返回完整错误列表；空 Vec = 有效
+/// Call live to get a full report; empty Vec = valid
+#[tauri::command]
+pub async fn workflow_validate(graph: crate::workflow::model::WorkflowGraph) -> Result<ValidationReport, String> {
+    Ok(validate_graph(&graph))
 }
 
 #[tauri::command]

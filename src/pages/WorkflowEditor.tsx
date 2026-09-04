@@ -14,7 +14,7 @@ import {
   Background,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Save, Play, Pencil } from "lucide-react";
+import { Save, Play, Pencil, AlertTriangle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,8 @@ import { useWorkflowsStore } from "@/stores/workflows";
 import { usePluginsStore } from "@/stores/plugins";
 import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
-import type { Workflow, WorkflowGraph, WorkflowNode } from "@/types";
+import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
+import type { Workflow, WorkflowGraph, WorkflowNode, GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
 import { BindingsDrawer } from "@/components/workflow/BindingsDrawer";
@@ -126,6 +127,11 @@ export default function WorkflowEditor() {
   const [loadingWf, setLoadingWf] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+
+  // 实时校验：graph 每次变化重算错误列表
+  // Live validation: recompute errors on every graph change
+  const validationErrors = useMemo<GraphError[]>(() => validateGraph(graph), [graph]);
+  const hasFatal = hasFatalErrors(validationErrors);
 
   // React Flow 状态
   // React Flow state
@@ -283,6 +289,12 @@ export default function WorkflowEditor() {
       toast.error(t("workflowEditor.inspector.name") + " — " + t("workflow.dialog.name"));
       return;
     }
+    // 前端校验闸（致命错误直接拒绝）；后端会再次校验
+    // Frontend validation gate (fatal errors reject); backend re-validates
+    if (hasFatal) {
+      toast.error(t("workflowEditor.validation.fatalTitle"));
+      return;
+    }
     setSaving(true);
     try {
       const wf: Workflow = {
@@ -290,6 +302,7 @@ export default function WorkflowEditor() {
         name: name.trim(),
         description: description.trim() || null,
         graph,
+        schema_version: 1,
         is_enabled: true,
         created_at: "",
         updated_at: "",
@@ -311,6 +324,10 @@ export default function WorkflowEditor() {
       toast.error("请先填写名称");
       return;
     }
+    if (hasFatal) {
+      toast.error(t("workflowEditor.validation.fatalTitle"));
+      return;
+    }
     setRunning(true);
     try {
       // 先保存
@@ -319,6 +336,7 @@ export default function WorkflowEditor() {
         name: name.trim(),
         description: description.trim() || null,
         graph,
+        schema_version: 1,
         is_enabled: true,
         created_at: "",
         updated_at: "",
@@ -394,18 +412,40 @@ export default function WorkflowEditor() {
             selectedNodeId={selectedNodeId}
             onChange={(bindings) => setGraph((prev) => ({ ...prev, bindings }))}
           />
-          <Button variant="outline" onClick={handleSave} disabled={saving}>
+          <Button variant="outline" onClick={handleSave} disabled={hasFatal || saving}>
             <Save />
             {saving ? t("workflow.saving") : t("workflowEditor.save")}
           </Button>
           {isTauri() && (
-            <Button variant="default" onClick={handleRun} disabled={running}>
+            <Button variant="default" onClick={handleRun} disabled={hasFatal || running}>
               <Play />
               {running ? t("workflowEditor.running") : t("workflowEditor.run")}
             </Button>
           )}
         </div>
       </div>
+
+      {/* 图校验错误提示 */}
+      {/* Graph validation error bar */}
+      {validationErrors.length > 0 && (
+        <div
+          className={`rounded border px-3 py-1.5 text-xs ${
+            hasFatal
+              ? "border-destructive/50 bg-destructive/10 text-destructive"
+              : "border-yellow-500/50 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+          }`}
+        >
+          <div className="flex items-center gap-1.5 font-medium">
+            {hasFatal ? <AlertCircle className="size-3.5 shrink-0" /> : <AlertTriangle className="size-3.5 shrink-0" />}
+            {hasFatal ? t("workflowEditor.validation.fatalTitle") : t("workflowEditor.validation.warningTitle")}
+          </div>
+          <ul className="mt-0.5 space-y-0.5 pl-4">
+            {validationErrors.map((e, i) => (
+              <li key={i}>{e.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 中部：三栏布局 */}
       {/* Middle: three-column layout (flex-1 + min-h-0 so it fills available space) */}

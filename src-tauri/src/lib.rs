@@ -62,6 +62,7 @@ pub fn run() {
             workflow::commands::workflow_delete,
             workflow::commands::workflow_runs,
             workflow::commands::workflow_run_steps,
+            workflow::commands::workflow_validate,
             workflow::commands::trigger_save,
             workflow::commands::trigger_delete,
             workflow::commands::trigger_list

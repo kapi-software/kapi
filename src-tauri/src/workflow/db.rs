@@ -113,6 +113,9 @@ pub async fn workflow_get(pool: &SqlitePool, workflow_id: &str) -> Result<Option
         name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
         description: row.try_get("description").ok(),
         graph,
+        // 老数据无 schema_version 字段时按 0 处理
+        // Legacy rows without schema_version are treated as v0
+        schema_version: row.try_get("schema_version").unwrap_or(0),
         is_enabled: {
             let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
             v != 0
@@ -139,6 +142,7 @@ pub async fn workflow_list(pool: &SqlitePool) -> Result<Vec<Workflow>, String> {
             name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
             description: row.try_get("description").ok(),
             graph,
+            schema_version: row.try_get("schema_version").unwrap_or(0),
             is_enabled: {
                 let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
                 v != 0

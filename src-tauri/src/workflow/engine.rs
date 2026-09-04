@@ -285,6 +285,7 @@ impl WorkflowEngine {
             name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
             description: row.try_get("description").ok(),
             graph,
+            schema_version: row.try_get("schema_version").unwrap_or(0),
             is_enabled: {
                 let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
                 v != 0
