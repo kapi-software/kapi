@@ -24,6 +24,7 @@ import { usePluginsStore } from "@/stores/plugins";
 import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
 import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
+import { validateConnection } from "@/lib/workflow-connection";
 import { isStructuredField, type Workflow, type WorkflowEdge, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
@@ -309,39 +310,46 @@ export default function WorkflowEditor() {
   // Connect nodes on the canvas (React Flow built-in behavior)
   // P1：连线时按 manifest outputs/inputs 自动生成 edge.map（同名字段自动映射）
   // P1: on connect, auto-generate edge.map per manifest outputs/inputs (same-name auto-map)
+  // P1-2：连接前用 validateConnection 验证（同名输出/输入类型不匹配则拒绝）
+  // P1-2: validate connection before accepting (reject on type mismatch)
+  const findNode = useCallback(
+    (id: string) => nodes.find((n) => n.id === id),
+    [nodes],
+  )
+
+  // 实时校验：拖线过程中显示拒绝
+  // Live validation: react when dragging an edge
+  const isValidConnection = useCallback(
+    (params: Connection | { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      if (!params.source || !params.target) return false
+      const sourceNode = findNode(params.source)
+      const targetNode = findNode(params.target)
+      const r = validateConnection(
+        { source: params.source, target: params.target },
+        sourceNode as { id: string; type?: string; plugin_id?: string; action?: string } | undefined,
+        targetNode as { id: string; type?: string; plugin_id?: string; action?: string } | undefined,
+        plugins,
+      )
+      return r.ok
+    },
+    [findNode, plugins],
+  )
+
   const onConnect = useCallback(
     (params: Connection) => {
-      // 从 plugins store 查 manifest（懒加载，manifest 可能还未加载）
-      // Look up manifests from plugins store (may not be loaded yet)
-      const sourcePlugin = plugins.find(
-        (p) => p.id === nodes.find((n) => n.id === params.source)?.data?.plugin_id,
+      const sourceNode = findNode(params.source ?? "")
+      const targetNode = findNode(params.target ?? "")
+      const r = validateConnection(
+        { source: params.source ?? "", target: params.target ?? "" },
+        sourceNode as { id: string; type?: string; plugin_id?: string; action?: string } | undefined,
+        targetNode as { id: string; type?: string; plugin_id?: string; action?: string } | undefined,
+        plugins,
       )
-      const targetPlugin = plugins.find(
-        (p) => p.id === nodes.find((n) => n.id === params.target)?.data?.plugin_id,
-      )
-      const sourceAction = sourcePlugin?.manifest?.workflow?.actions?.find(
-        (a: { name: string }) => a.name === nodes.find((n) => n.id === params.source)?.data?.action,
-      )
-      const targetAction = targetPlugin?.manifest?.workflow?.actions?.find(
-        (a: { name: string }) => a.name === nodes.find((n) => n.id === params.target)?.data?.action,
-      )
-
-      // 提取 outputs/inputs 字段名列表（兼容 v1 Record<string, string> 和 v2 FieldSpec）
-      // Extract output/input field names (compatible with both v1 Record<string,string> and v2 FieldSpec)
-      const sourceOutputs = sourceAction?.outputs
-        ? Object.keys(sourceAction.outputs)
-        : []
-      const targetInputs = targetAction?.inputs
-        ? Object.keys(targetAction.inputs)
-        : []
-
-      // 同名字段自动映射：outputs 中的每个字段，若也在 target inputs 中出现则自动映射
-      // Same-name auto-map: each output field that also appears in target inputs
-      const defaultMap: Record<string, string> = {}
-      for (const outField of sourceOutputs) {
-        if (targetInputs.includes(outField)) {
-          defaultMap[outField] = outField
-        }
+      if (!r.ok) {
+        // 兜底提示（isValidConnection 已阻止；这里是键盘触发的兜底）
+        // Fallback toast (isValidConnection blocks mouse drag; this catches keyboard)
+        toast.error(r.reason)
+        return
       }
 
       setEdgesTyped((es: Edge[]) =>
@@ -351,13 +359,13 @@ export default function WorkflowEditor() {
             type: "default",
             // 注入 edge.data.map，P1 核心：数据路由信息附着在边上
             // Inject edge.data.map — P1 core: data routing info lives on the edge
-            data: Object.keys(defaultMap).length > 0 ? { map: defaultMap } : undefined,
+            data: Object.keys(r.autoMap).length > 0 ? { map: r.autoMap } : undefined,
           },
           es,
         ),
       )
     },
-    [setEdgesTyped, plugins, nodes],
+    [setEdgesTyped, plugins, findNode],
   );
 
   // 删除选中节点
@@ -564,6 +572,9 @@ export default function WorkflowEditor() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            // P1-2：拖线过程中拒绝非法连接（自环 + 字段类型不匹配）
+            // P1-2: reject invalid connections during drag (self-loop + type mismatch)
+            isValidConnection={isValidConnection}
             onNodeClick={(_e: unknown, n: Node) => setSelectedNodeId(n.id)}
             onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
