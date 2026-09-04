@@ -227,13 +227,29 @@ export default function WorkflowEditor() {
 
   // React Flow nodes/edges 同步回 graph
   // Sync React Flow nodes/edges back into the graph
+  // P-∞：用 ref 比较上一次写入的 nodes/edges 引用，避免 React Flow 内部 store
+  // 触发的"假 setNodes"再次写入 graph，形成 feedback loop
+  // P-∞: use refs to compare last written nodes/edges references; break the
+  // feedback cycle where React Flow's internal store fires a "fake" setNodes
+  // that re-triggers setGraph
+  const lastNodesRef = useRef<Node[]>([])
+  const lastEdgesRef = useRef<Edge[]>([])
   useEffect(() => {
-    // 跳过初次 mount（initNodes 已是 graph 的真值，避免与 graph→nodes effect 互踩）
-    // Skip first mount: initNodes is already derived from graph, avoid ping-pong with graph→nodes
-    const isInitial =
-      nodes.length === 0 && edges.length === 0 &&
-      graph.nodes.length === 0 && graph.edges.length === 0;
-    if (isInitial) return;
+    // 跳过初次 mount（initNodes/initEdges 已是 graph 的真值）
+    // Skip first mount: initNodes/initEdges are already derived from graph
+    if (lastNodesRef.current.length === 0 && lastEdgesRef.current.length === 0
+        && graph.nodes.length === 0 && graph.edges.length === 0) {
+      lastNodesRef.current = nodes
+      lastEdgesRef.current = edges
+      return
+    }
+    // 引用相等 → React Flow 内部没动；跳过
+    // References equal -> no React Flow change; skip
+    if (lastNodesRef.current === nodes && lastEdgesRef.current === edges) {
+      return
+    }
+    lastNodesRef.current = nodes
+    lastEdgesRef.current = edges
     const gNodes = nodes.map((n) => rfNodeToGraphNode(n));
     // P1：序列化 edge.data.map —— 用户连线时按 manifest 自动填的默认映射
     // P1: serialize edge.data.map — defaults filled in on connect per manifest
