@@ -287,16 +287,12 @@ impl WorkflowEngine {
                 trigger.config.clone(),
                 cancel.clone(),
             ),
-            TriggerType::PluginEvent => {
-                spawn_plugin_event_trigger(
-                    app.clone(),
-                    trigger_id.clone(),
-                    trigger.workflow_id.clone(),
-                    trigger.config.clone(),
-                    cancel.clone(),
-                )
-                .await
-            }
+            TriggerType::PluginEvent => spawn_plugin_event_trigger(
+                app.clone(),
+                trigger.workflow_id.clone(),
+                trigger.config.clone(),
+                cancel.clone(),
+            ),
             _ => {
                 // B2：clipboard / hotkey 触发器现在终于接上线
                 // B2: clipboard / hotkey triggers are now actually wired
@@ -724,11 +720,13 @@ fn spawn_schedule_trigger(
     })
 }
 
-/// PluginEvent 触发器：轮询 plugin_events 表（游标持久化避免重启重放）
-/// PluginEvent trigger: poll the plugin_events table (cursor persisted to avoid replay on restart)
-async fn spawn_plugin_event_trigger(
+/// PluginEvent 触发器：订阅进程内事件总线（实时推送，plugin_events 表仅作审计历史）
+/// PluginEvent trigger: subscribes to the in-process event bus (real-time push;
+/// the plugin_events table stays audit-only history)
+/// 重启不重放：通道随进程存活，历史事件天然不进队列
+/// No replay on restart: the channel lives with the process, history never enqueues
+fn spawn_plugin_event_trigger(
     app: AppHandle,
-    trigger_id: String,
     workflow_id: String,
     config: Value,
     cancel: CancellationToken,
@@ -738,91 +736,30 @@ async fn spawn_plugin_event_trigger(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let pool = match crate::plugin::pool::sqlite_pool(&app).await {
-        Ok(p) => p,
-        Err(_) => {
-            return tokio::spawn(async move {});
-        }
-    };
+    let mut rx = crate::bridge::event_bus::subscribe_events();
     tokio::spawn(async move {
-        // 200ms 轮询：突发时延迟从 1s 降到 0.2s；不再有 LIMIT 1，事件批量消费
-        // 200ms poll: cuts burst latency from 1s to 0.2s; no LIMIT 1, batch consume
-        let mut interval = tokio::time::interval(Duration::from_millis(200));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // 跳过首次立即 tick：避免应用启动瞬间把已存在事件当成"新事件"全量重放一次
-        // Skip first immediate tick: prevents treating all existing events as new on startup
-        interval.tick().await;
-        // B4：从 DB 读取 last_event_id，避免重启后重放历史
-        // B4: read last_event_id from DB to avoid replaying history on restart
-        let mut last_event_id: i64 = match sqlx::query_scalar::<_, i64>(
-            "SELECT last_event_id FROM trigger_cursors WHERE trigger_id = ?",
-        )
-        .bind(&trigger_id)
-        .fetch_optional(&pool)
-        .await
-        .unwrap_or(None)
-        {
-            Some(v) => v,
-            None => 0,
-        };
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
-                _ = interval.tick() => {
-                    // 一次拉所有未消费的事件（按 id 升序），不再 LIMIT 1
-                    // Pull all unconsumed events (id ASC) — no LIMIT 1
-                    let rows = match sqlx::query(
-                        "SELECT id, data FROM plugin_events WHERE event_type = ? AND id > ? ORDER BY id",
-                    )
-                    .bind(&event_type)
-                    .bind(last_event_id)
-                    .fetch_all(&pool)
-                    .await {
-                        Ok(r) => r,
-                        Err(_) => continue,
-                    };
-
-                    if rows.is_empty() {
-                        continue;
-                    }
-
-                    let engine = match WorkflowEngine::from_app(&app) {
-                        Ok(e) => e,
-                        Err(_) => continue,
-                    };
-
-                    for row in rows {
-                        use sqlx::Row;
-                        let event_id: i64 = row.try_get("id").unwrap_or(0);
-                        let data_text: Option<String> = row.try_get::<Option<String>, _>("data").unwrap_or(None);
-                        let event_data: Value = match data_text.as_deref() {
-                            Some(s) => serde_json::from_str(s).unwrap_or(Value::Null),
-                            None => Value::Null,
-                        };
-
-                        // 推进游标：即使 execute 失败也推进，避免同一条事件反复重试
-                        // Advance cursor even on failure to avoid retrying the same row forever
-                        if event_id > last_event_id {
-                            last_event_id = event_id;
-                            // B4：游标落库（upsert）
-                            // B4: persist cursor (upsert)
-                            let _ = sqlx::query(
-                                "INSERT INTO trigger_cursors (trigger_id, last_event_id, updated_at) \
-                                 VALUES (?, ?, datetime('now')) \
-                                 ON CONFLICT(trigger_id) DO UPDATE SET \
-                                   last_event_id = excluded.last_event_id, \
-                                   updated_at = datetime('now')",
-                            )
-                            .bind(&trigger_id)
-                            .bind(event_id)
-                            .execute(&pool)
-                            .await;
+                msg = rx.recv() => match msg {
+                    Ok(m) => {
+                        if m.event_type != event_type {
+                            continue;
                         }
-
+                        let engine = match WorkflowEngine::from_app(&app) {
+                            Ok(e) => e,
+                            Err(_) => continue,
+                        };
                         let _ = engine
-                            .execute(&workflow_id, TriggerType::PluginEvent, event_data)
+                            .execute(&workflow_id, TriggerType::PluginEvent, m.data)
                             .await;
                     }
+                    // 慢消费丢最旧消息：记录后继续，不中断触发器
+                    // A slow consumer loses the oldest messages: log and keep going
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("[workflow] event trigger lagged, dropped {n} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         }

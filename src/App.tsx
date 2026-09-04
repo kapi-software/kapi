@@ -154,28 +154,29 @@ export default function App() {
     };
   }, []);
 
-  // Dock 配置推送（docs/PANEL.md §4.1 实时生效）：主窗口设置页变更 → Rust 轮询服务
-  // Dock config push (live application): settings changes in the panel reach the Rust polling service
-  // 放在 App 根组件：主面板与 dock 窗口都会执行，不依赖某一窗口存活
-  // Lives in the App root: both panel and dock windows run it, independent of either surviving
+  // Dock 配置推送（docs/PANEL.md §4.1 实时生效）：设置权威方（主窗口）单点推送
+  // Dock config push (live application): pushed solely by the settings authority (main window)
+  // 主窗口常驻（关闭即隐藏，见 lib.rs CloseRequested 拦截），不再需要每个窗口自推
+  // The main window is immortal (close hides it, see the CloseRequested guard in lib.rs),
+  // so per-window self-pushing is no longer needed
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || entry !== "main") return;
     invoke("dock_set_config", {
       enabled: dockEnabled,
       position: dockPosition,
       hotzoneWidth: dockHotzoneWidth,
       expandDelayMs: dockExpandDelay,
     }).catch((e) => console.error("dock_set_config 失败 / failed:", e));
-  }, [dockEnabled, dockPosition, dockHotzoneWidth, dockExpandDelay]);
+  }, [entry, dockEnabled, dockPosition, dockHotzoneWidth, dockExpandDelay]);
 
-  // 托盘菜单语言推送：跟随 settings.language 实时重建托盘文案
-  // Tray language push: rebuild tray labels live with settings.language
+  // 托盘菜单语言推送：同样只由主窗口推送（跟随 settings.language 实时重建托盘文案）
+  // Tray language push: main-window-only as well (rebuilds tray labels with settings.language)
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || entry !== "main") return;
     invoke("tray_set_language", { language }).catch((e) =>
       console.error("tray_set_language 失败 / failed:", e)
     );
-  }, [language]);
+  }, [entry, language]);
 
   // 主题应用：light/dark/system → html.dark class（shadcn 约定）
   // Theme application: light/dark/system → html.dark class (shadcn convention)

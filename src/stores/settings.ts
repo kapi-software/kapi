@@ -5,6 +5,7 @@
 // Design in docs/PANEL.md; each window (panel / dock) holds its own store,
 // changes broadcast via the settings:changed event and patch every window
 import { create } from 'zustand'
+import { invoke } from '@tauri-apps/api/core'
 import { emit } from '@tauri-apps/api/event'
 import { settingsDb, initDb } from '@/lib/db'
 import { isTauri } from '@/lib/tauri'
@@ -50,10 +51,11 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
   },
 
   updateSetting: async (key, value) => {
-    // 先写库再更新状态，失败时状态不被污染
-    // Persist first, then update state so failures don't dirty the UI
+    // 先写库再更新状态，失败时状态不被污染；写库走 Rust 命令（settings 表唯一写入口）
+    // Persist first, then update state so failures don't dirty the UI; the write
+    // goes through a Rust command (the sole write path for the settings table)
     if (isTauri()) {
-      await settingsDb.set(key, JSON.stringify(value))
+      await invoke('settings_set', { entries: { [key]: JSON.stringify(value) } })
       // 广播给所有窗口（含自身，重复应用幂等）
       // Broadcast to every window (including self; re-applying is idempotent)
       await emit('settings:changed', { key, value })
@@ -63,9 +65,12 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
 
   resetSettings: async () => {
     if (isTauri()) {
-      for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-        await settingsDb.set(key, JSON.stringify(value))
-      }
+      // 整批默认值单事务落库（一次 invoke，替代逐 key 往返）
+      // All defaults land in one transactional invoke (instead of per-key round-trips)
+      const entries = Object.fromEntries(
+        Object.entries(DEFAULT_SETTINGS).map(([key, value]) => [key, JSON.stringify(value)])
+      )
+      await invoke('settings_set', { entries })
       // 重置广播完整快照（逐 key 广播 15 次没有意义）
       // Reset broadcasts a full snapshot (15 per-key events would be wasteful)
       await emit('settings:changed', { settings: DEFAULT_SETTINGS })

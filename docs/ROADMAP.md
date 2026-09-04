@@ -36,7 +36,7 @@ Kapi 技术文档：里程碑、任务清单与风险表。
 - [x] **工作流引擎**（触发器 + DAG 调度 + 两级日志，2026-08-30）
 - [x] **工作流编辑器**（React Flow + NodePalette + NodeInspector + BindingsEditor，2026-08-30）
 - [x] **Transform 节点**（handlebars 模板渲染，2026-08-30）
-- [x] **触发器类型**：schedule（tokio time）/ plugin_event（轮询 plugin_events 表）/ clipboard（tauri-plugin-clipboard-manager）/ hotkey（tauri-plugin-global-shortcut）
+- [x] **触发器类型**：schedule（tokio time）/ plugin_event（订阅进程内事件总线）/ clipboard（tauri-plugin-clipboard-manager）/ hotkey（tauri-plugin-global-shortcut）
 - [x] **触发器前端**：TriggerDialog（Combobox 搜索下拉框，合并 manifest + 历史事件来源）、TriggerListPanel、BindingsDrawer
 - [x] **shadcn 组件**：Select / Switch / Combobox（搜索下拉）/ Drawer / InputGroup / Textarea
 

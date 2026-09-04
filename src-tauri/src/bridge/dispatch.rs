@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use sqlx::Row;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use crate::bridge::event_bus::{event_fanout, event_subscribe, event_unsubscribe};
+use crate::bridge::event_bus::{event_publish, event_subscribe, event_unsubscribe};
 use crate::bridge::log::write_system_log;
 use crate::bridge::types::{
     ClipboardWritePayload, EventsEmitPayload, EventsOnPayload, HttpFetchPayload,
@@ -310,7 +310,9 @@ pub async fn events_emit(pool: &sqlx::SqlitePool, plugin_id: &str, payload: Valu
         .as_deref()
         .and_then(|s| serde_json::from_str::<Value>(s).ok())
         .unwrap_or(Value::Null);
-    event_fanout(&p.event_type, plugin_id, &data_value);
+    // 落库（审计）之后立即广播：窗口扇出 + 触发器订阅，均不依赖表轮询
+    // Right after the audit insert: window fan-out + trigger subscription, no table polling
+    event_publish(&p.event_type, plugin_id, &data_value);
     Ok(Value::Null)
 }
 

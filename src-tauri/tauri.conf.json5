@@ -49,22 +49,34 @@
       },
     ],
     security: {
-      csp: null,
+      // CSP：主窗口只允许自身来源脚本（Tauri 会自动为注入脚本补 nonce/hash）；
+      // 插件资源走 kapi-plugin://（Windows 下映射 http://kapi-plugin.localhost），
+      // 其页面 CSP 由 plugin_protocol.rs 响应头单独下发
+      // CSP: the main window allows same-origin scripts only (Tauri auto-appends
+      // nonces/hashes for its injected scripts); plugin assets load via kapi-plugin://
+      // (mapped to http://kapi-plugin.localhost on Windows), whose page CSP is
+      // delivered separately as a response header by plugin_protocol.rs
+      csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: kapi-plugin: http://kapi-plugin.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; frame-src kapi-plugin: http://kapi-plugin.localhost; object-src 'none'; base-uri 'self'; form-action 'self'",
+      // 开发态放宽：Vite HMR websocket + react-refresh 的内联 preamble 脚本
+      // Dev relaxations: the Vite HMR websocket and react-refresh's inline preamble
+      devCsp: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: kapi-plugin: http://kapi-plugin.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; frame-src kapi-plugin: http://kapi-plugin.localhost; object-src 'none'; base-uri 'self'; form-action 'self'",
       // 内联 capability 定义
       // Inline capability definitions
       capabilities: [
         {
-          identifier: "default",
-          description: "主面板与 Dock 窗口的默认能力 / Capability for main and dock windows",
-          windows: ["main", "dock"],
+          // 主面板：无边框自绘标题栏需要窗口控制；数据面只读（sql:default）
+          // Main panel: the frameless custom titlebar needs window controls; read-only data
+          identifier: "main-cap",
+          description: "主面板窗口能力 / Capability for the main panel window",
+          windows: ["main"],
           permissions: [
             "core:default",
             "opener:default",
             "dialog:allow-open",
+            // sql:default 仅含 load/close/select：前端已只读化（写操作全走 Rust 命令）
+            // sql:default covers load/close/select only: the frontend is read-only now
+            // (all mutations go through Rust commands)
             "sql:default",
-            // sql:default 仅含 load/close/select：写操作（设置保存等）需显式放行
-            // sql:default covers load/close/select only: writes (settings saves) need explicit grant
-            "sql:allow-execute",
             "core:window:allow-minimize",
             "core:window:allow-maximize",
             "core:window:allow-unmaximize",
@@ -78,6 +90,17 @@
             // The plugins page lists windows to detect "running" (mode switch disabled)
             "core:window:allow-get-all-windows",
           ],
+        },
+        {
+          // Dock：只读数据 + 事件监听；点击唤醒走应用命令（不受 ACL 约束），
+          // 窗口显隐由 Rust dock 服务全权负责，无需任何窗口权限
+          // Dock: read-only data + event listening; click-to-wake goes through app
+          // commands (not ACL-gated); window visibility is fully owned by the Rust
+          // dock service, so no window permissions are needed
+          identifier: "dock-cap",
+          description: "Dock 窗口能力（只读）/ Dock window capability (read-only)",
+          windows: ["dock"],
+          permissions: ["core:default", "sql:default"],
         },
         {
           // 插件独立窗口壳（label 形如 plugin-com_kapi_sample_plugin-a，glob 匹配）

@@ -19,6 +19,24 @@ const SDK_NAMESPACE: &str = "__kapi__";
 // reference it by the absolute path /__kapi__/sdk.js)
 const SDK_JS: &str = include_str!("../assets/kapi-sdk.js");
 
+// 插件页 CSP：脚本/样式/连接仅限自身来源，第三方源一律拒绝 —— 被注入的插件页面
+// 不再能成为该插件权限的代理（docs/ARCHITECTURE.md 安全纵深）
+// Plugin-page CSP: scripts/styles/connections from its own origin only; third-party
+// sources are all rejected — an injected plugin page can no longer act as a full proxy
+// for that plugin's permissions
+// 内联 script/style 放行：本地插件页（如示例插件）以内联书写为常态，威胁在外部源
+// Inline script/style allowed: local plugin pages (e.g. the samples) commonly inline
+// them; the threat is external sources
+// frame-ancestors 收敛到宿主来源：主窗口 prod 为 tauri://localhost（Windows 为
+// http://tauri.localhost），dev 为 http://localhost:1420；其余来源禁止嵌套插件页
+// frame-ancestors pinned to host origins: the main window is tauri://localhost in prod
+// (http://tauri.localhost on Windows) and http://localhost:1420 in dev; any other
+// origin is forbidden from embedding plugin pages
+const PLUGIN_CSP: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
+    style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; \
+    media-src 'self'; connect-src 'self'; \
+    frame-ancestors 'self' tauri: http://tauri.localhost http://localhost:1420";
+
 // 请求解析错误：统一映射为 403/404，响应体不携带任何文件系统细节
 // Request parse errors: mapped to 403/404; response bodies never leak fs details
 #[derive(Debug)]
@@ -72,6 +90,7 @@ fn serve_from(plugins_root: &Path, method: &str, uri_path: &str) -> Response<Cow
                 .status(200)
                 .header("Content-Type", "text/javascript; charset=utf-8")
                 .header("Cache-Control", "no-store")
+                .header("Content-Security-Policy", PLUGIN_CSP)
                 .body(Cow::Borrowed(SDK_JS.as_bytes()))
                 .unwrap();
         }
@@ -228,13 +247,15 @@ fn content_type(path: &Path) -> &'static str {
     }
 }
 
-// 成功响应：Content-Type + no-store（插件更新后不残留旧资源缓存）
-// Success response: Content-Type + no-store (no stale asset cache after plugin updates)
+// 成功响应：Content-Type + no-store（插件更新后不残留旧资源缓存）+ CSP
+// Success response: Content-Type + no-store (no stale asset cache after plugin
+// updates) + CSP (takes effect on document loads; harmless on sub-resources)
 fn file_response(path: &Path, body: Vec<u8>) -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .status(200)
         .header("Content-Type", content_type(path))
         .header("Cache-Control", "no-store")
+        .header("Content-Security-Policy", PLUGIN_CSP)
         .body(Cow::Owned(body))
         .unwrap()
 }
@@ -332,7 +353,10 @@ mod tests {
     #[test]
     fn rejects_invalid_plugin_id_charset() {
         for path in ["/com foo/x", "/com%25foo/x", "/com~foo/x"] {
-            assert!(matches!(parse_request_path(path), Err(ProtocolError::Forbidden)));
+            assert!(matches!(
+                parse_request_path(path),
+                Err(ProtocolError::Forbidden)
+            ));
         }
     }
 
@@ -345,7 +369,10 @@ mod tests {
 
     #[test]
     fn empty_path_is_not_found() {
-        assert!(matches!(parse_request_path("/"), Err(ProtocolError::NotFound)));
+        assert!(matches!(
+            parse_request_path("/"),
+            Err(ProtocolError::NotFound)
+        ));
     }
 
     #[test]
@@ -379,7 +406,8 @@ mod tests {
     // 构造一次性临时插件根目录（测试各自独享，互不干扰）
     // Build a throwaway temp plugins root (one per test, no cross-test interference)
     fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("kapi-proto-test-{}-{}", std::process::id(), tag));
+        let dir =
+            std::env::temp_dir().join(format!("kapi-proto-test-{}-{}", std::process::id(), tag));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -405,6 +433,12 @@ mod tests {
         // no-store：插件更新后不使用旧缓存
         // no-store: no stale cache after plugin updates
         assert_eq!(res.headers().get("Cache-Control").unwrap(), "no-store");
+        // CSP 头必须存在：文档加载即生效，第三方源被拒
+        // The CSP header must be present: effective on document loads, rejecting
+        // third-party sources
+        let csp = res.headers().get("Content-Security-Policy").unwrap().to_str().unwrap();
+        assert!(csp.contains("default-src 'none'"));
+        assert!(csp.contains("frame-ancestors"));
         assert_eq!(res.body().as_ref(), b"<html>hello</html>".as_slice());
 
         let _ = std::fs::remove_dir_all(&root);
@@ -462,7 +496,10 @@ mod tests {
         assert_eq!(serve_from(&root, "GET", "/com.foo/nope.html").status(), 404);
         // 整个插件未安装 → 404
         // Plugin not installed at all -> 404
-        assert_eq!(serve_from(&root, "GET", "/com.bar/index.html").status(), 404);
+        assert_eq!(
+            serve_from(&root, "GET", "/com.bar/index.html").status(),
+            404
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -478,10 +515,16 @@ mod tests {
 
         // 词法层即拒绝：web 之外的路径无法用 ".." 表达（403）
         // Rejected lexically: paths outside web/ cannot be expressed with ".." (403)
-        assert_eq!(serve_from(&root, "GET", "/com.foo/../com.foo/manifest.json").status(), 403);
+        assert_eq!(
+            serve_from(&root, "GET", "/com.foo/../com.foo/manifest.json").status(),
+            403
+        );
         // 直接拼出的越界文件名不存在 → 404（不泄露存在性）
         // A directly-joined out-of-tree name does not exist -> 404 (no existence leak)
-        assert_eq!(serve_from(&root, "GET", "/com.foo/manifest.json").status(), 404);
+        assert_eq!(
+            serve_from(&root, "GET", "/com.foo/manifest.json").status(),
+            404
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -491,8 +534,14 @@ mod tests {
         let root = temp_root("method");
         write_file(&root, "com.foo/web/index.html", "x");
 
-        assert_eq!(serve_from(&root, "POST", "/com.foo/index.html").status(), 405);
-        assert_eq!(serve_from(&root, "HEAD", "/com.foo/index.html").status(), 405);
+        assert_eq!(
+            serve_from(&root, "POST", "/com.foo/index.html").status(),
+            405
+        );
+        assert_eq!(
+            serve_from(&root, "HEAD", "/com.foo/index.html").status(),
+            405
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -525,7 +574,10 @@ mod tests {
         // index fallback) is a 404
         assert_eq!(serve_from(&root, "GET", "/__kapi__/other.js").status(), 404);
         assert_eq!(serve_from(&root, "GET", "/__kapi__/").status(), 404);
-        assert_eq!(serve_from(&root, "GET", "/__kapi__/../com.foo/x").status(), 403);
+        assert_eq!(
+            serve_from(&root, "GET", "/__kapi__/../com.foo/x").status(),
+            403
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

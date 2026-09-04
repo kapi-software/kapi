@@ -318,11 +318,29 @@ http://kapi-plugin.localhost/<plugin_id>/<path>   (Windows / WebView2)
 WorkflowEngine
 ├── wasm: Arc<WasmRuntime>              # WASM 运行时（已实现）
 ├── triggers: TriggerManager            # 内存态触发器注册表
-│   ├── schedule: HashMap<trigger_id, tokio::time::Interval>
-│   ├── plugin_event: HashMap<trigger_id, last_event_id>
+│   ├── schedule: cron 表达式 → tokio::time 定时
+│   ├── plugin_event: broadcast::Receiver（订阅 bridge::event_bus 进程内事件总线）
 │   ├── clipboard: Stream (tauri-plugin-clipboard-manager)
 │   └── hotkey: Stream (tauri-plugin-global-shortcut)
-└── poll_interval: Duration             # plugin_event 轮询间隔（默认 500ms）
+└── janitor: 每小时裁剪 plugin_events / system_logs 保留最新 N 条
 ```
 
+plugin_event 触发器经进程内广播通道实时接收事件（`events.emit` 落库仅作审计历史，触发器不轮询表）；重启后通道为空，天然不重放历史。
+
 TriggerManager 在应用启动时从 `workflow_triggers` 表加载所有启用的触发器，工作流编辑器保存/删除触发器时实时更新注册表。
+
+### 3.7 安全纵深（CSP 与 capability）
+
+**主窗口 CSP**（`tauri.conf.json5` `app.security.csp`）：`script-src 'self'`（Tauri 自动为注入脚本补 nonce/hash），样式因运行时注入 `<style>`（sonner / radix）放行 `'unsafe-inline'`；插件资源经 `kapi-plugin:` / `http://kapi-plugin.localhost` 放行（`img-src` 图标 + `frame-src` 内嵌 iframe）；IPC 走 `ipc:` / `http://ipc.localhost`。开发态 `devCsp` 额外放行 react-refresh 内联 preamble 与 HMR websocket。
+
+**插件页 CSP**（`plugin_protocol.rs` 响应头，对所有 200 响应下发）：`default-src 'none'` 收底，脚本/样式/连接仅限自身来源 —— 被注入的插件页面无法加载第三方脚本，不再构成该插件权限的代理。本地插件页惯用内联书写（示例插件即如此），故 script/style 放行 `'unsafe-inline'`（威胁模型在外部源）。`frame-ancestors` 收敛到宿主来源（`tauri:` / `http://tauri.localhost` / dev `http://localhost:1420`），其余来源禁止嵌套插件页。
+
+**capability 分窗收口**（均为只读数据面：`sql:default`，无 `sql:allow-execute`）：
+
+| capability | 窗口 | 权限 |
+| ---------- | ---- | ---- |
+| `main-cap` | main | 窗口控制（无边框标题栏）+ opener/dialog + sql 只读 |
+| `dock-cap` | dock | `core:default` + sql 只读（点击唤醒走应用命令，不受 ACL 约束；窗口显隐由 Rust dock 服务全权负责） |
+| `plugin-window` | plugin-* | `core:default` + sql 只读 + show/set-focus（壳就绪后自显） |
+
+**配置单点推送**：`dock_set_config` / `tray_set_language` 仅由主窗口（设置权威方）推送 —— 主窗口常驻（关闭即隐藏），dock / 插件窗口不再各自推送。

@@ -3,9 +3,11 @@
 mod db;
 mod dock;
 mod error;
+mod janitor;
 pub mod bridge;
 pub mod plugin;
 mod plugin_protocol;
+mod settings;
 mod store;
 mod tray;
 pub mod wasm;
@@ -53,6 +55,10 @@ pub fn run() {
             plugin::install::plugin_install,
             plugin::install::plugin_uninstall,
             plugin::launch::launch_plugin,
+            plugin::mutate::plugin_set_enabled,
+            plugin::mutate::plugin_set_window_mode,
+            plugin::mutate::plugin_reorder,
+            settings::settings_set,
             store::store_list,
             store::store_install,
             tray::tray_set_language,
@@ -108,8 +114,11 @@ pub fn run() {
             })?;
             app.manage(Arc::new(workflow::engine::WorkflowEngine::new(
                 wasm, // Arc<WasmRuntime>
-                pool_for_engine,
+                pool_for_engine.clone(),
             )));
+            // 后台清理：plugin_events / system_logs 保留策略（docs/DATABASE.md §1.1）
+            // Background janitor: retention for plugin_events / system_logs
+            janitor::start(pool_for_engine);
             // 启动已持久化的触发器（schedule / plugin_event / clipboard / hotkey）
             // Start persisted triggers (schedule / plugin_event / clipboard / hotkey)
             let engine = app

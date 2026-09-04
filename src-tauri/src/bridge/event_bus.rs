@@ -5,20 +5,38 @@ use std::sync::OnceLock;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-// 订阅表 + 宿主句柄
-// Subscription table + host handle
-#[derive(Default)]
+// 进程内广播通道容量：超出后慢订阅者丢最旧消息（Lagged），触发器宁可丢也不阻塞发射方
+// In-process broadcast capacity: a slow subscriber loses the oldest messages (Lagged)
+// rather than ever blocking the emitter
+const EVENT_CHANNEL_CAPACITY: usize = 1024;
+
+// 广播给进程内订阅者（触发器）的消息
+// Message broadcast to in-process subscribers (triggers)
+#[derive(Clone)]
+pub struct EventMessage {
+    pub event_type: String,
+    pub source: String,
+    pub data: Value,
+}
+
+// 订阅表 + 宿主句柄 + 进程内广播通道
+// Subscription table + host handle + in-process broadcast channel
 pub struct EventBus {
     // (宿主窗口 label, 插件 id) → 订阅的事件类型集合
     // (host window label, plugin id) -> subscribed event types
     pub subs: std::sync::Mutex<HashMap<(String, String), HashSet<String>>>,
     pub app: OnceLock<AppHandle>,
+    pub event_tx: tokio::sync::broadcast::Sender<EventMessage>,
 }
 
 pub static EVENT_BUS: OnceLock<EventBus> = OnceLock::new();
 
 pub fn event_bus() -> &'static EventBus {
-    EVENT_BUS.get_or_init(EventBus::default)
+    EVENT_BUS.get_or_init(|| EventBus {
+        subs: std::sync::Mutex::new(HashMap::new()),
+        app: OnceLock::new(),
+        event_tx: tokio::sync::broadcast::channel(EVENT_CHANNEL_CAPACITY).0,
+    })
 }
 
 // setup 注入宿主句柄
@@ -92,4 +110,24 @@ pub fn event_fanout(event_type: &str, source: &str, data: &Value) {
             eprintln!("kapi: event push to '{label}' failed: {e}");
         }
     }
+}
+
+// 发布：窗口扇出 + 进程内广播（触发器等消费者经 subscribe_events 消费）
+// Publish: window fan-out + in-process broadcast (triggers consume via subscribe_events)
+// DB 落库仅作审计历史，不再作为队列被轮询
+// The DB row stays audit-only history; nothing polls it as a queue anymore
+pub fn event_publish(event_type: &str, source: &str, data: &Value) {
+    event_fanout(event_type, source, data);
+    let _ = event_bus().event_tx.send(EventMessage {
+        event_type: event_type.to_string(),
+        source: source.to_string(),
+        data: data.clone(),
+    });
+}
+
+// 订阅进程内事件流：返回广播 Receiver（多订阅者各自独立消费）
+// Subscribe to the in-process event stream: returns a broadcast Receiver
+// (each subscriber consumes independently)
+pub fn subscribe_events() -> tokio::sync::broadcast::Receiver<EventMessage> {
+    event_bus().event_tx.subscribe()
 }

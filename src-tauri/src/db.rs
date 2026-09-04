@@ -45,6 +45,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/006_workflow_schema_version.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "drop trigger cursors (event bus replaced table polling)",
+            sql: include_str!("../migrations/007_drop_trigger_cursors.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

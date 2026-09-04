@@ -97,19 +97,21 @@ export const usePluginsStore = create<PluginsState>((set, get) => ({
     await broadcastChanged();
   },
 
+  // 写操作统一走 Rust 命令（模式合法性在写路径校验），前端不再直写 SQL
+  // Mutations go through Rust commands (mode legality enforced in the write path)
   async setEnabled(id, enabled) {
-    await pluginDb.updateEnabled(id, enabled);
+    await invoke("plugin_set_enabled", { pluginId: id, enabled });
     await get().load();
     await broadcastChanged();
   },
 
   async setWindowMode(id, mode) {
-    await pluginDb.updateWindowMode(id, mode);
+    await invoke("plugin_set_window_mode", { pluginId: id, mode });
     await get().load();
     await broadcastChanged();
   },
 
-  // 上移 / 下移：与相邻插件交换 sort_order 后整表重排
+  // 上移 / 下移：与相邻插件交换后整表重排（入参即全量顺序）
   // Move up/down: swap with the neighbor then rewrite the full ordering
   async move(id, dir) {
     const { plugins } = get();
@@ -118,7 +120,7 @@ export const usePluginsStore = create<PluginsState>((set, get) => ({
     if (index < 0 || target < 0 || target >= plugins.length) return;
     const next = [...plugins];
     [next[index], next[target]] = [next[target], next[index]];
-    await pluginDb.updateSortOrder(next.map((p) => p.id));
+    await invoke("plugin_reorder", { orderedIds: next.map((p) => p.id) });
     await get().load();
     await broadcastChanged();
   },

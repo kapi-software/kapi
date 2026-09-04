@@ -6,7 +6,24 @@ Kapi 技术文档：SQLite 表结构、迁移与前端访问层。
 
 使用 **SQLite**，通过 `tauri-plugin-sql` 访问。
 
-**迁移唯一入口在 Rust 侧**：使用 `tauri_plugin_sql::Migration` 在插件初始化时自动执行（见 ARCHITECTURE.md §3.2）。前端 `Database.load('sqlite:kapi.db')` 只做读写，不执行任何 DDL —— 避免双端初始化竞态，保证迁移有版本记录、只跑一次。
+**迁移唯一入口在 Rust 侧**：setup 阶段由 `workflow::db::open_pool_with_migrations` 同步连接并执行迁移（先于触发器启动）；前端 `Database.load('sqlite:kapi.db')` 为幂等打开（两侧共用 `_sqlx_migrations` 版本表，checksum 一致，后到者自动跳过）。
+
+### 1.1 写者矩阵 / Writer Matrix
+
+目标态：**每张表只有一个写者入口**。前端数据面已只读化（`src/lib/db.ts` 仅 SELECT，capability 不再放行 `sql:allow-execute`），所有写操作收敛为 Rust 命令或 Rust 内部路径：
+
+| 表 | 写者 | 入口 | 说明 |
+| -- | ---- | ---- | ---- |
+| `plugins` | Rust | `plugin_install` / `store_install`（安装/更新）· `plugin_uninstall` · `plugin_set_enabled` · `plugin_set_window_mode` · `plugin_reorder` | 模式合法性在写路径按 manifest 校验 |
+| `plugin_data` | Rust | 插件 `kv.set` 等桥接命令（权限层强制命名空间隔离） | 外键级联随 plugins 删除 |
+| `workflows` | Rust | `workflow_save` / `workflow_delete` 命令 | 引擎与命令路径共用同一池 |
+| `workflow_triggers` | Rust | `trigger_save` / `trigger_delete` 命令（引擎订阅进程内总线，无游标表） | |
+| `workflow_runs` / `workflow_step_logs` | Rust | 引擎执行路径内部写入 | |
+| `settings` | Rust | `settings_set` 命令 · `store_list`/`store_install` 内部缓存写入 | 前端广播 `settings:changed` 仅同步内存态 |
+| `plugin_events` | Rust | `events.emit` 桥接路径落库（仅审计历史，触发器走进程内总线） | janitor 每小时保留最新 10000 条 |
+| `system_logs` | Rust | `bridge::log` 内部写入 | janitor 每小时保留最新 20000 条 |
+
+前端读路径：`src/lib/db.ts`（pluginDb / settingsDb / logDb / eventDb，全部 SELECT）。
 
 ## 2. 表结构总览
 
