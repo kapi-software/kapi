@@ -2,6 +2,7 @@
 // Kapi app entry: plugin registration, DB migrations, protocol, commands, dock service, system tray
 mod db;
 mod dock;
+mod error;
 pub mod bridge;
 pub mod plugin;
 mod plugin_protocol;
