@@ -1,5 +1,16 @@
 // 日志页：system_logs 与 plugin_events 双视图，级别/来源过滤与自动刷新（docs/PANEL.md）
 // Logs page: system_logs and plugin_events views with filtering and auto-refresh
+// D3: UTC ISO → 本地可读时间 / UTC ISO → local readable time
+function fmt(s: string | undefined | null): string {
+  if (!s) return "—";
+  try {
+    return new Date(s).toLocaleString(undefined, {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  } catch { return s; }
+}
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw, ScrollText, Zap } from "lucide-react";
@@ -176,7 +187,7 @@ export default function Logs() {
                       <Badge variant={levelVariant(log.level)} className="mt-0.5 shrink-0 lowercase">
                         {log.level}
                       </Badge>
-                      <span className="shrink-0 text-muted-foreground">{log.created_at}</span>
+                      <span className="shrink-0 text-muted-foreground">{fmt(log.created_at)}</span>
                       <span className="min-w-0 break-all">{log.message}</span>
                     </li>
                   ))}
@@ -200,7 +211,7 @@ export default function Logs() {
                       <Zap className="mr-1 size-3" />
                       {ev.event_type}
                     </Badge>
-                    <span className="shrink-0 text-muted-foreground">{ev.created_at}</span>
+                    <span className="shrink-0 text-muted-foreground">{fmt(ev.created_at)}</span>
                     <span className="shrink-0 text-muted-foreground/80">
                       {ev.source_plugin_id ?? t("logs.eventSourceUnknown")}
                     </span>

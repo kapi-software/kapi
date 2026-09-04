@@ -8,6 +8,24 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+
+// D3: 把 SQLite UTC ISO 字符串 → 用户本地时区可读字符串
+// D3: convert SQLite UTC ISO string → local timezone human-readable string
+function fmt(s: string | undefined | null): string {
+  if (!s) return "—";
+  try {
+    return new Date(s).toLocaleString(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return s; // fallback to raw
+  }
+}
 import { useWorkflowsStore } from "@/stores/workflows";
 import type { Workflow, WorkflowRun, WorkflowStepLog } from "@/types";
 
@@ -163,7 +181,7 @@ function RunList({
                   <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                 )}
                 <span className="font-mono text-muted-foreground">#{run.id}</span>
-                <span className="truncate">{run.started_at}</span>
+                <span className="truncate">{fmt(run.started_at)}</span>
                 {run.trigger_type && (
                   <Badge variant="outline" className="shrink-0 font-normal">
                     {run.trigger_type}
@@ -193,11 +211,11 @@ function RunList({
                       {t('workflow.history.triggerType')}: {run.trigger_type ?? '—'}
                     </span>
                     <span>
-                      {t('workflow.history.startedAt')}: {run.started_at}
+                      {t('workflow.history.startedAt')}: {fmt(run.started_at)}
                     </span>
                     {run.finished_at && (
                       <span>
-                        {t('workflow.history.finishedAt')}: {run.finished_at}
+                        {t('workflow.history.finishedAt')}: {fmt(run.finished_at)}
                       </span>
                     )}
                     {run.error && (

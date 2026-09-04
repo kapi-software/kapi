@@ -106,7 +106,7 @@ function WorkflowCard({
           <p className="text-[10px] text-muted-foreground/70">
             {t("workflow.lastRun")}:{" "}
             {latestRun
-              ? `${latestRun.started_at} · ${t(statusKey(latestRun.status))}`
+              ? `${new Date(latestRun.started_at).toLocaleString()} · ${t(statusKey(latestRun.status))}`
               : t("workflow.neverRun")}
             {" · "}
             {t("workflow.nodes")}: {nodeCount} · {t("workflow.edges")}: {edgeCount} ·{" "}
@@ -186,7 +186,7 @@ function WorkflowCard({
             {workflow.is_enabled ? "✓" : "✗"}
           </Field>
           <Field label={t("workflow.fieldCreatedAt")}>
-            {workflow.created_at || "—"}
+            {new Date(workflow.created_at).toLocaleString() || "—"}
           </Field>
           <Field label={t("workflow.fieldUpdatedAt")}>
             {workflow.updated_at || "—"}
@@ -203,7 +203,7 @@ function WorkflowCard({
           {latestRun && (
             <>
               <Field label={t("workflow.fieldLastRun")}>
-                {latestRun.started_at}
+                {new Date(latestRun.started_at).toLocaleString()}
               </Field>
               <Field label={t("workflow.fieldLastRunStatus")}>
                 {t(statusKey(latestRun.status))}
