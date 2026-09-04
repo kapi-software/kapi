@@ -7,16 +7,18 @@ use handlebars::Handlebars;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-use crate::workflow::model::{DataBinding, NodeOutcome, WorkflowNode};
+use crate::workflow::model::{NodeOutcome, WorkflowNode};
 use crate::wasm::engine::WasmRuntime;
 
 /// 执行单个节点（plugin 或 transform）
 /// Execute a single node (plugin or transform)
+/// `edge_map` 是从 graph 中筛出指向本节点的边，map 字段形如 { upstream_output: downstream_input }
+/// `edge_map` is the subset of edges that point to this node; map fields are { upstream_output: downstream_input }
 pub async fn run_node(
     run_id: i64,
     node: WorkflowNode,
     prior_outputs: HashMap<String, Value>,
-    bindings: Vec<DataBinding>,
+    edge_map: Vec<HashMap<String, String>>,
     trigger_data: Value,
     wasm: &WasmRuntime,
     pool: &SqlitePool,
@@ -27,7 +29,7 @@ pub async fn run_node(
     // Transform 节点：Handlebars 模板渲染
     // Transform node: Handlebars template rendering
     if node.node_type == "transform" {
-        return run_transform_node(run_id, &node, &bindings, &prior_outputs, &trigger_data, pool, handlebars).await;
+        return run_transform_node(run_id, &node, &edge_map, &prior_outputs, &trigger_data, pool, handlebars).await;
     }
 
     // Plugin 节点
@@ -46,7 +48,7 @@ pub async fn run_node(
         }
     };
 
-    let input = assemble_input(&bindings, &prior_outputs, &trigger_data, &node.config);
+    let input = assemble_input(&edge_map, &prior_outputs, &trigger_data, &node.config);
 
     // INSERT step_log(running)
     let step_log_id = match sqlx::query(
@@ -100,7 +102,7 @@ pub async fn run_node(
 async fn run_transform_node(
     run_id: i64,
     node: &WorkflowNode,
-    bindings: &[DataBinding],
+    edge_map: &[HashMap<String, String>],
     prior_outputs: &HashMap<String, Value>,
     trigger_data: &Value,
     pool: &SqlitePool,
@@ -114,7 +116,7 @@ async fn run_transform_node(
         .and_then(|t| t.as_str())
         .unwrap_or("{}");
 
-    let context = assemble_input(bindings, prior_outputs, trigger_data, &node.config);
+    let context = assemble_input(edge_map, prior_outputs, trigger_data, &node.config);
 
     match handlebars.render_template(template, &context) {
         Ok(rendered) => {
@@ -170,26 +172,46 @@ async fn run_transform_node(
     }
 }
 
-/// 拼装节点输入：bindings 优先；node.config 作为默认值
-/// Build node input: bindings win; node.config fields are the fallback
+/// 拼装节点输入：从上游 outputs（按 edges.map）取值；node.config 作为缺省
+/// Build node input: read upstream outputs via edges.map; node.config fields are fallback defaults
+///
+/// 每个 edge_map 形如 `{ upstream_output: downstream_input }`：表示把上游 outputs[upstream_output]
+/// 喂给本节点 inputs[downstream_input]
+/// Each edge_map is { upstream_output: downstream_input }: upstream outputs[upstream_output]
+/// → this node inputs[downstream_input]
+///
+/// 特殊 key `__trigger__` 表示从 trigger_data 取值（保留旧 binding 行为）
+/// Special key `__trigger__` reads from trigger_data (legacy binding behavior)
 pub fn assemble_input(
-    bindings: &[DataBinding],
+    edge_map: &[HashMap<String, String>],
     prior_outputs: &HashMap<String, Value>,
     trigger_data: &Value,
     node_config: &Option<Value>,
 ) -> Value {
     let mut obj = serde_json::Map::new();
-    for b in bindings {
-        let source_value = if b.from == "__trigger__" {
-            trigger_data.get(&b.output).cloned().unwrap_or(Value::Null)
-        } else {
-            prior_outputs
-                .get(&b.from)
-                .and_then(|v| v.get(&b.output))
-                .cloned()
-                .unwrap_or(Value::Null)
-        };
-        obj.insert(b.input.clone(), source_value);
+    for map in edge_map {
+        for (upstream_output, downstream_input) in map {
+            // __trigger__ 是保留的伪 source id；上游字段是 upstream_output
+            // __trigger__ is the reserved pseudo-source id; upstream field is upstream_output
+            let source_value = if upstream_output == "__trigger__" {
+                trigger_data.get(downstream_input).cloned().unwrap_or(Value::Null)
+            } else if let Some((source_id, field)) = upstream_output.split_once(':') {
+                // 新形式 "<source_node_id>:<field>" —— 把来源 id 编码进 key，避免上游与下游字段名同名歧义
+                // New form "<source_node_id>:<field>" — encode source id in the key to disambiguate
+                prior_outputs
+                    .get(source_id)
+                    .and_then(|v| v.get(field))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            } else {
+                // 旧形式：只写上游字段名，从 prior_outputs 找（单上游默认）
+                // Legacy: just upstream field name; find in prior_outputs (single-upstream default)
+                // 多个上游同名字段无法区分——在数据层已被 P1 提示避免
+                // Multiple upstreams with the same field name are ambiguous; P1 surfaces this
+                find_field_in_outputs(prior_outputs, upstream_output)
+            };
+            obj.insert(downstream_input.clone(), source_value);
+        }
     }
     if let Some(Value::Object(cfg)) = node_config {
         for (k, v) in cfg {
@@ -197,6 +219,17 @@ pub fn assemble_input(
         }
     }
     Value::Object(obj)
+}
+
+/// 在所有上游 outputs 中查找第一个出现指定字段名的值
+/// Find the first upstream output that contains the given field name
+fn find_field_in_outputs(prior_outputs: &HashMap<String, Value>, field: &str) -> Value {
+    for v in prior_outputs.values() {
+        if let Some(inner) = v.get(field) {
+            return inner.clone();
+        }
+    }
+    Value::Null
 }
 
 async fn record_step_failure(pool: &SqlitePool, run_id: i64, node: &WorkflowNode, err: &str) {

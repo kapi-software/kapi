@@ -345,6 +345,7 @@ mod tests {
                 .map(|(from, to)| crate::workflow::model::WorkflowEdge {
                     from: from.to_string(),
                     to: to.to_string(),
+                    map: Default::default(),
                 })
                 .collect(),
             bindings: vec![],

@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::bridge::log::write_system_log;
 use crate::workflow::model::{
-    DataBinding, NodeOutcome, RunOutcome, TriggerEntry, TriggerType, Workflow, WorkflowContext,
+    NodeOutcome, RunOutcome, TriggerEntry, TriggerType, Workflow, WorkflowContext,
     WorkflowGraph, WorkflowRun, WorkflowTrigger,
 };
 use crate::workflow::node::run_node;
@@ -211,18 +211,20 @@ impl WorkflowEngine {
                 let pool = self.pool.clone();
                 let handlebars = self.handlebars.clone();
                 let ctx_outputs = snapshot_outputs(&ctx.outputs);
-                let bindings: Vec<DataBinding> = workflow
+                // P1：从 edges 收集指向本节点的边，map 形如 { upstream_output: downstream_input }
+                // P1: collect edges pointing to this node; map shape is { upstream_output: downstream_input }
+                let edge_map: Vec<std::collections::HashMap<String, String>> = workflow
                     .graph
-                    .bindings
+                    .edges
                     .iter()
-                    .filter(|b| b.to == node_id)
-                    .cloned()
+                    .filter(|e| e.to == node_id)
+                    .map(|e| e.map.clone())
                     .collect();
                 let trigger_data = ctx.trigger.clone();
                 let run_id_clone = run_id;
 
                 join_set.spawn(async move {
-                    run_node(run_id_clone, node, ctx_outputs, bindings, trigger_data, &wasm, &pool, &handlebars).await
+                    run_node(run_id_clone, node, ctx_outputs, edge_map, trigger_data, &wasm, &pool, &handlebars).await
                 });
             }
             while let Some(joined) = join_set.join_next().await {

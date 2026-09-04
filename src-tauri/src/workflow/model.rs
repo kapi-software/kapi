@@ -1,5 +1,7 @@
 // 工作流数据模型：触发器 / DAG 节点与边 / 执行记录
 // Workflow data model: triggers, DAG nodes & edges, execution records
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -101,6 +103,12 @@ pub struct WorkflowNode {
 pub struct WorkflowEdge {
     pub from: String,
     pub to: String,
+    /// 数据映射：上游 output field name → 下游 input field name
+    /// Data map: upstream output field name → downstream input field name
+    /// 例：{ "text": "content", "meta": "info" } 表示把上游 outputs.text 喂给下游 inputs.content
+    /// Example: { "text": "content", "meta": "info" } means upstream outputs.text → downstream inputs.content
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub map: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -24,10 +24,9 @@ import { usePluginsStore } from "@/stores/plugins";
 import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
 import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
-import { isStructuredField, type Workflow, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
+import { isStructuredField, type Workflow, type WorkflowEdge, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
-import { BindingsDrawer } from "@/components/workflow/BindingsDrawer";
 import { ActionConfigForm } from "@/components/workflow/ActionConfigForm";
 
 // 默认节点类型注册（用于 React Flow 自定义节点）
@@ -94,10 +93,13 @@ function graphToRfState(graph: WorkflowGraph): { initNodes: Node[]; initEdges: E
       y: n.position?.y ?? Math.floor(i / COLS) * 120,
     }),
   );
+  // P1：加载已保存工作流时反序列化 edge.map
+  // P1: deserialize edge.map when loading saved workflow
   const initEdges: Edge[] = graph.edges.map((e, i) => ({
     id: `e-${i}`,
     source: e.from,
     target: e.to,
+    data: e.map ? { map: e.map } : undefined,
   }));
   return { initNodes, initEdges };
 }
@@ -208,7 +210,13 @@ export default function WorkflowEditor() {
       graph.nodes.length === 0 && graph.edges.length === 0;
     if (isInitial) return;
     const gNodes = nodes.map((n) => rfNodeToGraphNode(n));
-    const gEdges = edges.map((e) => ({ from: e.source, to: e.target }));
+    // P1：序列化 edge.data.map —— 用户连线时按 manifest 自动填的默认映射
+    // P1: serialize edge.data.map — defaults filled in on connect per manifest
+    const gEdges: WorkflowEdge[] = edges.map((e) => ({
+      from: e.source,
+      to: e.target,
+      map: (e.data as { map?: Record<string, string> } | undefined)?.map,
+    }));
     setGraph((prev) => {
       // 引用相等则不更新（避免循环）
       // Skip if references are equal (avoid loop)
@@ -255,11 +263,57 @@ export default function WorkflowEditor() {
 
   // 在画布上连线（React Flow 内置行为）
   // Connect nodes on the canvas (React Flow built-in behavior)
+  // P1：连线时按 manifest outputs/inputs 自动生成 edge.map（同名字段自动映射）
+  // P1: on connect, auto-generate edge.map per manifest outputs/inputs (same-name auto-map)
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdgesTyped((es: Edge[]) => addEdge({ ...params, type: "default" }, es));
+      // 从 plugins store 查 manifest（懒加载，manifest 可能还未加载）
+      // Look up manifests from plugins store (may not be loaded yet)
+      const sourcePlugin = plugins.find(
+        (p) => p.id === nodes.find((n) => n.id === params.source)?.data?.plugin_id,
+      )
+      const targetPlugin = plugins.find(
+        (p) => p.id === nodes.find((n) => n.id === params.target)?.data?.plugin_id,
+      )
+      const sourceAction = sourcePlugin?.manifest?.workflow?.actions?.find(
+        (a: { name: string }) => a.name === nodes.find((n) => n.id === params.source)?.data?.action,
+      )
+      const targetAction = targetPlugin?.manifest?.workflow?.actions?.find(
+        (a: { name: string }) => a.name === nodes.find((n) => n.id === params.target)?.data?.action,
+      )
+
+      // 提取 outputs/inputs 字段名列表（兼容 v1 Record<string, string> 和 v2 FieldSpec）
+      // Extract output/input field names (compatible with both v1 Record<string,string> and v2 FieldSpec)
+      const sourceOutputs = sourceAction?.outputs
+        ? Object.keys(sourceAction.outputs)
+        : []
+      const targetInputs = targetAction?.inputs
+        ? Object.keys(targetAction.inputs)
+        : []
+
+      // 同名字段自动映射：outputs 中的每个字段，若也在 target inputs 中出现则自动映射
+      // Same-name auto-map: each output field that also appears in target inputs
+      const defaultMap: Record<string, string> = {}
+      for (const outField of sourceOutputs) {
+        if (targetInputs.includes(outField)) {
+          defaultMap[outField] = outField
+        }
+      }
+
+      setEdgesTyped((es: Edge[]) =>
+        addEdge(
+          {
+            ...params,
+            type: "default",
+            // 注入 edge.data.map，P1 核心：数据路由信息附着在边上
+            // Inject edge.data.map — P1 core: data routing info lives on the edge
+            data: Object.keys(defaultMap).length > 0 ? { map: defaultMap } : undefined,
+          },
+          es,
+        ),
+      )
     },
-    [setEdgesTyped],
+    [setEdgesTyped, plugins, nodes],
   );
 
   // 删除选中节点
@@ -267,13 +321,9 @@ export default function WorkflowEditor() {
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNodeId) return;
     setNodesTyped((ns: Node[]) => ns.filter((n: Node) => n.id !== selectedNodeId));
+    // P1：删边时自动级联删除（edges 携带数据，无需单独清理 bindings）
+    // P1: deleting edges auto-cascades data (edges carry their data; no bindings to clean)
     setEdgesTyped((es: Edge[]) => es.filter((e: Edge) => e.source !== selectedNodeId && e.target !== selectedNodeId));
-    // 同步清理 dangling bindings（from/to 任一端在该节点上的绑定都要删）
-    // Clean up dangling bindings when deleting a node
-    setGraph((prev) => ({
-      ...prev,
-      bindings: prev.bindings.filter((b) => b.from !== selectedNodeId && b.to !== selectedNodeId),
-    }));
     setSelectedNodeId(null);
   }, [selectedNodeId, setNodesTyped, setEdgesTyped]);
 
@@ -414,13 +464,6 @@ export default function WorkflowEditor() {
           />
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <BindingsDrawer
-            graph={graph}
-            nodes={nodes}
-            edges={edges}
-            selectedNodeId={selectedNodeId}
-            onChange={(bindings) => setGraph((prev) => ({ ...prev, bindings }))}
-          />
           <Button variant="outline" onClick={handleSave} disabled={hasFatal || saving}>
             <Save />
             {saving ? t("workflow.saving") : t("workflowEditor.save")}
