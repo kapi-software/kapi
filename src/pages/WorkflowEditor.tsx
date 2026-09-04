@@ -291,13 +291,31 @@ export default function WorkflowEditor() {
         },
       };
       setNodesTyped((ns: Node[]) => [...ns, newNode]);
+      // P-∞: 同步更新 graph state，否则刷新后 useEffect([graph]) 用旧 initNodes 覆盖 React Flow store
+      // P-∞: keep graph state in sync; otherwise useEffect([graph]) overwrites the
+      // React Flow store with stale initNodes on remount / refresh
+      setGraph((prev) => ({
+        ...prev,
+        nodes: [
+          ...prev.nodes,
+          {
+            id: newNode.id,
+            type: newNode.type as "plugin" | "transform",
+            plugin_id: newNode.data?.plugin_id as string ?? "",
+            action: newNode.data?.action as string ?? "",
+            config: newNode.data?.config as Record<string, unknown> ?? {},
+            position: { x: newNode.position.x, y: newNode.position.y },
+            display_name: newNode.data?.display_name as string | undefined,
+          },
+        ],
+      }));
       // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
       // 注释掉即可避免双击节点崩溃（用户实测确认）
       // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
       // commenting it out avoids the double-click crash (user-verified)
       setSelectedNodeId(newNode.id);
     },
-    [setNodesTyped, plugins, graph.nodes.length],
+    [setNodesTyped, plugins, graph.nodes.length, setGraph],
   );
 
   // 添加 Transform 节点
@@ -317,10 +335,27 @@ export default function WorkflowEditor() {
       },
     };
     setNodesTyped((ns: Node[]) => [...ns, newNode]);
+    // P-∞: 同步更新 graph state
+    // P-∞: keep graph state in sync
+    setGraph((prev) => ({
+      ...prev,
+      nodes: [
+        ...prev.nodes,
+        {
+          id: newNode.id,
+          type: "transform" as const,
+          plugin_id: "",
+          action: "",
+          config: newNode.data?.config as Record<string, unknown> ?? {},
+          position: { x: newNode.position.x, y: newNode.position.y },
+          display_name: newNode.data?.display_name as string | undefined,
+        },
+      ],
+    }));
     // P-∞: setSelectedNodeId 同样跳过（避免双击数据转换节点崩溃）
     // P-∞: same here (avoid crash on double-click of transform node)
     setSelectedNodeId(newNode.id);
-  }, [setNodesTyped, graph.nodes.length]);
+  }, [setNodesTyped, graph.nodes.length, setGraph]);
 
   // 在画布上连线（React Flow 内置行为）
   // Connect nodes on the canvas (React Flow built-in behavior)
@@ -380,8 +415,27 @@ export default function WorkflowEditor() {
           es,
         ),
       )
+      // P-∞: 同步更新 graph state
+      // P-∞: keep graph state in sync
+      setGraph((prev) => {
+        const exists = prev.edges.some(
+          (e) => e.from === params.source && e.to === params.target,
+        )
+        if (exists) return prev
+        return {
+          ...prev,
+          edges: [
+            ...prev.edges,
+            {
+              from: params.source ?? "",
+              to: params.target ?? "",
+              map: Object.keys(r.autoMap).length > 0 ? r.autoMap : undefined,
+            },
+          ],
+        }
+      })
     },
-    [setEdgesTyped, plugins, findNode],
+    [setEdgesTyped, plugins, findNode, setGraph],
   );
 
   // 删除选中节点
@@ -392,8 +446,15 @@ export default function WorkflowEditor() {
     // P1：删边时自动级联删除（edges 携带数据，无需单独清理 bindings）
     // P1: deleting edges auto-cascades data (edges carry their data; no bindings to clean)
     setEdgesTyped((es: Edge[]) => es.filter((e: Edge) => e.source !== selectedNodeId && e.target !== selectedNodeId));
+    // P-∞: 同步更新 graph state
+    // P-∞: keep graph state in sync
+    setGraph((prev) => ({
+      ...prev,
+      nodes: prev.nodes.filter((n) => n.id !== selectedNodeId),
+      edges: prev.edges.filter((e) => e.from !== selectedNodeId && e.to !== selectedNodeId),
+    }));
     setSelectedNodeId(null);
-  }, [selectedNodeId, setNodesTyped, setEdgesTyped]);
+  }, [selectedNodeId, setNodesTyped, setEdgesTyped, setGraph]);
 
   // 更新选中节点属性（右侧面板编辑）
   // Update selected node properties (right panel edit)
@@ -405,8 +466,25 @@ export default function WorkflowEditor() {
           n.id === selectedNodeId ? { ...n, data: { ...n.data, ...patch } } : n,
         ),
       );
+      // P-∞: 同步更新 graph state（否则刷新时用旧 graph 覆盖新节点）
+      // P-∞: keep graph state in sync (otherwise refresh overwrites the new node)
+      setGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((n) =>
+          n.id === selectedNodeId
+            ? {
+                ...n,
+                display_name: (patch.display_name as string | undefined) ?? n.display_name,
+                plugin_id: (patch.plugin_id as string | undefined) ?? n.plugin_id,
+                action: (patch.action as string | undefined) ?? n.action,
+                config: (patch.config as Record<string, unknown> | undefined) ?? n.config,
+                type: (patch.type as "plugin" | "transform" | undefined) ?? n.type,
+              }
+            : n,
+        ),
+      }));
     },
-    [selectedNodeId, setNodesTyped],
+    [selectedNodeId, setNodesTyped, setGraph],
   );
 
   // 保存
