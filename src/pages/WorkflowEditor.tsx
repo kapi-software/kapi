@@ -48,6 +48,9 @@ function rfNodeToGraphNode(n: Node): WorkflowNode {
     plugin_id: n.data?.plugin_id as string ?? "",
     action: n.data?.action as string ?? "",
     config: n.data?.config as Record<string, unknown> ?? {},
+    // 保留 position：拖动节点会修改 n.position，需要落库
+    // Keep position: dragging modifies n.position, must be persisted
+    position: { x: n.position.x, y: n.position.y },
   };
 }
 
@@ -69,14 +72,16 @@ function graphNodeToRfNode(n: WorkflowNode, pos?: { x: number; y: number }): Nod
 
 // 从已有 graph 初始化 React Flow nodes/edges
 // Initialize React Flow nodes/edges from an existing graph
+// 优先用存的 position（v2 起节点位置落库），没有才网格排
+// Prefer persisted position (since v2, positions are persisted); fall back to grid layout
 function graphToRfState(graph: WorkflowGraph): { initNodes: Node[]; initEdges: Edge[] } {
-  // 用网格布局给节点分配位置（简单行布局）
-  // Assign positions using a simple grid layout
+  // 用网格布局给节点分配位置（仅在无 position 时使用）
+  // Assign positions using a simple grid layout (only when no position is stored)
   const COLS = 3;
   const initNodes: Node[] = graph.nodes.map((n, i) =>
     graphNodeToRfNode(n, {
-      x: (i % COLS) * 280,
-      y: Math.floor(i / COLS) * 120,
+      x: n.position?.x ?? (i % COLS) * 280,
+      y: n.position?.y ?? Math.floor(i / COLS) * 120,
     }),
   );
   const initEdges: Edge[] = graph.edges.map((e, i) => ({
@@ -124,9 +129,25 @@ export default function WorkflowEditor() {
 
   // React Flow 状态
   // React Flow state
-  const { initNodes, initEdges } = useMemo(() => graphToRfState(graph), []);
+  // 注意：useMemo 不能用空依赖 []，否则打开已保存工作流时 initNodes 永远是空图（mount 时的 graph 几乎都是 EMPTY_GRAPH）。
+  // 这里以 graph 引用作为依赖：graph 一旦被 useEffect 146 行从 store 加载进 setGraph，graphToRfState 立即重算。
+  // NOTE: useMemo cannot use [] dep — otherwise initNodes stays the empty graph captured on mount.
+  // graph is the dep: once the loader effect (line ~146) calls setGraph(wf.graph), this recomputes.
+  const { initNodes, initEdges } = useMemo(() => graphToRfState(graph), [graph]);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initEdges);
+
+  // 同步 store graph → React Flow（load 完成后用最新 graph 全量替换）
+  // Sync store graph → React Flow (full replace after the loader effect sets graph)
+  // 之前是单向 nodes→graph，导致打开已保存工作流时画布空白 + 编辑后保存覆盖原图。
+  // Previously one-way nodes→graph; opening a saved workflow left the canvas blank and saving overwrote the original.
+  useEffect(() => {
+    setNodes(initNodes);
+    setEdges(initEdges);
+    // 只在外部 graph 变化时同步，避免与 nodes→graph effect 死循环
+    // Only sync on external graph changes to avoid an infinite loop with nodes→graph
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph]);
 
   // 显式标注 setNodes / setEdges 回调类型（避免 useMemo 推断失效 → any）
   // Explicitly annotate setNodes / setEdges callback types
@@ -151,9 +172,11 @@ export default function WorkflowEditor() {
     }
     const wf = workflows.find((w) => w.id === id) ?? null;
     if (wf) {
+      // 新 graph 引用，触发 useMemo([graph]) 重算 + graph→nodes effect 全量替换
+      // New graph reference triggers useMemo([graph]) recompute + graph→nodes full replace
       setName(wf.name);
       setDescription(wf.description ?? "");
-      setGraph(wf.graph);
+      setGraph({ ...wf.graph, nodes: [...wf.graph.nodes], edges: [...wf.graph.edges], bindings: [...wf.graph.bindings] });
     }
     // 找不到 wf 视为新建：name/description 已由 URL 预填，graph 保持空
     // Not found ⇒ new: name/description already pre-filled from the URL; graph stays empty
@@ -163,10 +186,28 @@ export default function WorkflowEditor() {
   // React Flow nodes/edges 同步回 graph
   // Sync React Flow nodes/edges back into the graph
   useEffect(() => {
+    // 跳过初次 mount（initNodes 已是 graph 的真值，避免与 graph→nodes effect 互踩）
+    // Skip first mount: initNodes is already derived from graph, avoid ping-pong with graph→nodes
+    const isInitial =
+      nodes.length === 0 && edges.length === 0 &&
+      graph.nodes.length === 0 && graph.edges.length === 0;
+    if (isInitial) return;
     const gNodes = nodes.map((n) => rfNodeToGraphNode(n));
     const gEdges = edges.map((e) => ({ from: e.source, to: e.target }));
-    setGraph((prev) => ({ ...prev, nodes: gNodes, edges: gEdges }));
-  }, [nodes, edges]);
+    setGraph((prev) => {
+      // 引用相等则不更新（避免循环）
+      // Skip if references are equal (avoid loop)
+      if (
+        prev.nodes.length === gNodes.length &&
+        prev.edges.length === gEdges.length &&
+        prev.nodes.every((n, i) => n === gNodes[i]) &&
+        prev.edges.every((e, i) => e === gEdges[i])
+      ) {
+        return prev;
+      }
+      return { ...prev, nodes: gNodes, edges: gEdges };
+    });
+  }, [nodes, edges, graph.nodes.length, graph.edges.length]);
 
   // 从左侧面板拖入新节点
   // Drop a new node from the left palette
@@ -212,6 +253,12 @@ export default function WorkflowEditor() {
     if (!selectedNodeId) return;
     setNodesTyped((ns: Node[]) => ns.filter((n: Node) => n.id !== selectedNodeId));
     setEdgesTyped((es: Edge[]) => es.filter((e: Edge) => e.source !== selectedNodeId && e.target !== selectedNodeId));
+    // 同步清理 dangling bindings（from/to 任一端在该节点上的绑定都要删）
+    // Clean up dangling bindings when deleting a node
+    setGraph((prev) => ({
+      ...prev,
+      bindings: prev.bindings.filter((b) => b.from !== selectedNodeId && b.to !== selectedNodeId),
+    }));
     setSelectedNodeId(null);
   }, [selectedNodeId, setNodesTyped, setEdgesTyped]);
 

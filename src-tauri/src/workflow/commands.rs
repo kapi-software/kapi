@@ -46,6 +46,13 @@ pub async fn workflow_save(app: AppHandle, workflow: Workflow) -> Result<(), Str
 #[tauri::command]
 pub async fn workflow_delete(app: AppHandle, workflow_id: String) -> Result<(), String> {
     let pool = sqlite_pool(&app).await?;
+    // 删除工作流前，先 unregister 所有属于该工作流的触发器（避免定时器/监听器泄漏）
+    // Unregister all triggers belonging to this workflow before deletion
+    let engine = WorkflowEngine::from_app(&app)?;
+    let triggers = db::trigger_list(&pool, Some(&workflow_id)).await?;
+    for trigger in triggers {
+        engine.unregister_trigger(&trigger.id).await;
+    }
     db::workflow_delete(&pool, &workflow_id).await
 }
 

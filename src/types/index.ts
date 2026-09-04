@@ -122,6 +122,9 @@ export interface WorkflowNode {
   plugin_id?: string
   action?: string
   config?: Record<string, unknown>
+  // 画布坐标（React Flow position），打开工作流时还原画布布局
+  // Canvas position (React Flow position), restores layout when reopening
+  position?: { x: number; y: number }
 }
 
 // 数据绑定：源节点输出 key → 目标节点输入 key

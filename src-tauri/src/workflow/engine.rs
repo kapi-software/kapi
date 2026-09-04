@@ -169,6 +169,26 @@ impl WorkflowEngine {
         trigger_data: Value,
     ) -> Result<WorkflowRun, String> {
         let workflow = self.load_workflow(workflow_id).await?;
+        // 总闸：工作流被禁用时，触发器类来源一律拒绝；手动运行放行（让用户能测试）
+        // Master switch: reject trigger-driven execution when the workflow is disabled;
+        // manual runs pass through (lets the user still test a disabled workflow).
+        if !workflow.is_enabled && !matches!(trigger_type, TriggerType::Manual) {
+            let _ = write_system_log(
+                &self.pool,
+                "warn",
+                &format!(
+                    "workflow {} is disabled; ignored {} trigger",
+                    workflow_id,
+                    trigger_type.as_str()
+                ),
+                "workflow_engine",
+                Some(json!({ "workflow_id": workflow_id, "trigger_type": trigger_type.as_str() })),
+            )
+            .await;
+            return Err(format!(
+                "WorkflowDisabled: workflow {workflow_id} is disabled (master switch off)"
+            ));
+        }
         let waves = topological_waves(&workflow.graph)?;
 
         let run_id = self.insert_run(workflow_id, trigger_type).await?;
@@ -376,6 +396,9 @@ fn spawn_schedule_trigger(
     let workflow_id = workflow_id;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
+        // 跳过首次立即 tick：tokio::interval 的第一个 tick 总是立即触发，需要显式跳过
+        // Skip first immediate tick: tokio::interval fires immediately on the first tick
+        interval.tick().await;
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
@@ -413,20 +436,37 @@ async fn spawn_plugin_event_trigger(
         }
     };
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        // 200ms 轮询：突发时延迟从 1s 降到 0.2s；不再有 LIMIT 1，事件批量消费
+        // 200ms poll: cuts burst latency from 1s to 0.2s; no LIMIT 1, batch consume
+        let mut interval = tokio::time::interval(Duration::from_millis(200));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // 跳过首次立即 tick：避免应用启动瞬间把已存在事件当成"新事件"全量重放一次
+        // Skip first immediate tick: prevents treating all existing events as new on startup
+        interval.tick().await;
         let mut last_event_id: i64 = 0;
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 _ = interval.tick() => {
+                    // 一次拉所有未消费的事件（按 id 升序），不再 LIMIT 1
+                    // Pull all unconsumed events (id ASC) — no LIMIT 1
                     let rows = match sqlx::query(
-                        "SELECT id, data FROM plugin_events WHERE event_type = ? AND id > ? ORDER BY id LIMIT 1",
+                        "SELECT id, data FROM plugin_events WHERE event_type = ? AND id > ? ORDER BY id",
                     )
                     .bind(&event_type)
                     .bind(last_event_id)
                     .fetch_all(&pool)
                     .await {
                         Ok(r) => r,
+                        Err(_) => continue,
+                    };
+
+                    if rows.is_empty() {
+                        continue;
+                    }
+
+                    let engine = match WorkflowEngine::from_app(&app) {
+                        Ok(e) => e,
                         Err(_) => continue,
                     };
 
@@ -439,14 +479,12 @@ async fn spawn_plugin_event_trigger(
                             None => Value::Null,
                         };
 
+                        // 推进游标：即使 execute 失败也推进，避免同一条事件反复重试
+                        // Advance cursor even on failure to avoid retrying the same row forever
                         if event_id > last_event_id {
                             last_event_id = event_id;
                         }
 
-                        let engine = match WorkflowEngine::from_app(&app) {
-                            Ok(e) => e,
-                            Err(_) => continue,
-                        };
                         let _ = engine
                             .execute(&workflow_id, TriggerType::PluginEvent, event_data)
                             .await;

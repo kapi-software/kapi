@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useWorkflowsStore } from "@/stores/workflows";
 import { isTauri } from "@/lib/tauri";
-import type { Workflow, WorkflowRun } from "@/types";
+import type { Workflow, WorkflowRun, WorkflowTrigger } from "@/types";
 import { NewWorkflowDialog } from "@/components/workflow/NewWorkflowDialog";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { CardDetailDialog } from "@/components/common/CardDetailDialog";
@@ -55,7 +55,7 @@ function WorkflowCard({
   onHistory: (w: Workflow) => void;
   onDelete: (w: Workflow) => void;
   onToggle: (w: Workflow, enabled: boolean) => void;
-  onTriggerEdit: (w: Workflow) => void;
+  onTriggerEdit: (t: WorkflowTrigger) => void;
   busy: boolean;
 }) {
   const { t } = useTranslation();
@@ -117,7 +117,7 @@ function WorkflowCard({
         {/* 触发器面板 */}
         {/* Triggers panel */}
         <div className="rounded-md border border-dashed bg-muted/30 p-2">
-          <TriggerListPanel workflowId={workflow.id} onEdit={() => onTriggerEdit(workflow)} />
+          <TriggerListPanel workflowId={workflow.id} onEdit={onTriggerEdit} />
         </div>
 
         {/* 底部：启停 Switch + 全部操作按钮（运行/历史/编辑/删除） */}
@@ -229,7 +229,9 @@ export default function Workflow() {
   // Trigger dialog state
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [triggerTarget, setTriggerTarget] = useState<Workflow | null>(null);
-  const [editingTriggerId, setEditingTriggerId] = useState<string | null>(null);
+  // 编辑中的 trigger；null = 新建，否则为编辑
+  // The trigger being edited; null = new, otherwise edit
+  const [editingTrigger, setEditingTrigger] = useState<WorkflowTrigger | null>(null);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -319,9 +321,12 @@ export default function Workflow() {
 
   const handleEdit = (w: Workflow) => navigate(`/workflow/${w.id}/edit`);
   const handleHistory = (w: Workflow) => navigate(`/workflow/${w.id}/runs`);
-  const handleTriggerEdit = (w: Workflow) => {
-    setTriggerTarget(w);
-    setEditingTriggerId(null);
+  const handleTriggerEdit = (t: WorkflowTrigger) => {
+    // 找到所属工作流（触发器列表是按 workflow 拉的，但 onEdit 只拿到 trigger）
+    // Find owning workflow (the trigger list is loaded per workflow, but onEdit only sees the trigger)
+    const wf = workflows.find((w) => w.id === t.workflow_id) ?? null;
+    setTriggerTarget(wf);
+    setEditingTrigger(t);
     setTriggerDialogOpen(true);
   };
 
@@ -382,7 +387,7 @@ export default function Workflow() {
           open={triggerDialogOpen}
           onOpenChange={setTriggerDialogOpen}
           workflowId={triggerTarget.id}
-          trigger={editingTriggerId ? null : null}
+          trigger={editingTrigger}
         />
       )}
 
