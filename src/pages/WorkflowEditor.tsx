@@ -24,10 +24,11 @@ import { usePluginsStore } from "@/stores/plugins";
 import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
 import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
-import type { Workflow, WorkflowGraph, WorkflowNode, GraphError } from "@/types";
+import { isStructuredField, type Workflow, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
 import { BindingsDrawer } from "@/components/workflow/BindingsDrawer";
+import { ActionConfigForm } from "@/components/workflow/ActionConfigForm";
 
 // 默认节点类型注册（用于 React Flow 自定义节点）
 // Default node type registry (for React Flow custom nodes)
@@ -53,6 +54,14 @@ function rfNodeToGraphNode(n: Node): WorkflowNode {
     // Keep position: dragging modifies n.position, must be persisted
     position: { x: n.position.x, y: n.position.y },
   };
+}
+
+// 检测 manifest action 是否有结构化 schema（v2）—— 至少一个 input/output 含 type 字段
+// Detect whether a manifest action has structured schema (v2) — at least one input/output has a `type` field
+function isStructuredAction(action: { inputs?: Record<string, unknown>; outputs?: Record<string, unknown> }): boolean {
+  const hasStructured = (map: Record<string, unknown> | undefined) =>
+    !!map && Object.values(map).some((v) => isStructuredField(v))
+  return hasStructured(action.inputs) || hasStructured(action.outputs)
 }
 
 // WorkflowNode → React Flow Node（仅追加 data，不改 position）
@@ -658,24 +667,32 @@ function NodeInspector({
                 </div>
               )}
 
-              {/* 节点配置 JSON */}
-              {/* Node config JSON */}
-              <div className="space-y-0.5">
-                <Label className="text-[10px] text-muted-foreground">
-                  {t("workflowEditor.inspector.config")}
-                </Label>
-                <textarea
-                  className="h-20 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
-                  value={configText}
-                  onChange={(e) => setConfigText(e.target.value)}
-                  onBlur={handleConfigBlur}
-                  placeholder={t("workflowEditor.inspector.configPlaceholder")}
-                  spellCheck={false}
+              {/* 节点配置：按 manifest inputs schema 渲染；v1 老 manifest 回退 JSON textarea */}
+              {/* Node config: render per manifest inputs schema; v1 legacy manifests fall back to JSON textarea */}
+              {selectedAction && isStructuredAction(selectedAction) ? (
+                <ActionConfigForm
+                  config={(node.data.config as Record<string, unknown>) ?? {}}
+                  inputs={selectedAction.inputs}
+                  onChange={(c) => onUpdate({ config: c })}
                 />
-                {configError && (
-                  <p className="text-[10px] text-destructive">{configError}</p>
-                )}
-              </div>
+              ) : (
+                <div className="space-y-0.5">
+                  <Label className="text-[10px] text-muted-foreground">
+                    {t("workflowEditor.inspector.config")}
+                  </Label>
+                  <textarea
+                    className="h-20 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
+                    value={configText}
+                    onChange={(e) => setConfigText(e.target.value)}
+                    onBlur={handleConfigBlur}
+                    placeholder={t("workflowEditor.inspector.configPlaceholder")}
+                    spellCheck={false}
+                  />
+                  {configError && (
+                    <p className="text-[10px] text-destructive">{configError}</p>
+                  )}
+                </div>
+              )}
             </>
           )}
 
