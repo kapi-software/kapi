@@ -302,7 +302,11 @@ export default function WorkflowEditor() {
         },
       };
       setNodesTyped((ns: Node[]) => [...ns, newNode]);
-      setSelectedNodeId(newNode.id);
+      // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
+      // 注释掉即可避免双击节点崩溃（用户实测确认）
+      // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
+      // commenting it out avoids the double-click crash (user-verified)
+      // setSelectedNodeId(newNode.id);
     },
     [setNodesTyped, plugins, graph.nodes.length],
   );
@@ -324,6 +328,8 @@ export default function WorkflowEditor() {
       },
     };
     setNodesTyped((ns: Node[]) => [...ns, newNode]);
+    // P-∞: setSelectedNodeId 同样跳过（避免双击数据转换节点崩溃）
+    // P-∞: same here (avoid crash on double-click of transform node)
     // setSelectedNodeId(newNode.id);
   }, [setNodesTyped, graph.nodes.length]);
 
