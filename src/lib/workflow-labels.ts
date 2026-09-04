@@ -32,7 +32,7 @@ export function summarizeTriggerConfig(config: TriggerConfig | Record<string, un
  * 把 cron 5 字段表达式翻译成人类语言（简单翻译）
  * Translate 5-field cron to a short human description
  * "0 9 * * *" → "每天 09:00"
- * "*/5 * * * *" → "每 5 分钟"
+ * "* /5 * * * *" → "每 5 分钟"
  * "0 8 * * 1" → "每周一 08:00"
  * 其他情况回退到原始表达式
  */

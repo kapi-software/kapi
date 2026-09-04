@@ -1,6 +1,6 @@
 // 工作流可视化编辑器页（/workflow/new 与 /workflow/:id/edit）
 // Workflow visual editor page (/workflow/new and /workflow/:id/edit)
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -178,13 +178,18 @@ export default function WorkflowEditor() {
   // Sync store graph → React Flow (full replace after the loader effect sets graph)
   // 之前是单向 nodes→graph，导致打开已保存工作流时画布空白 + 编辑后保存覆盖原图。
   // Previously one-way nodes→graph; opening a saved workflow left the canvas blank and saving overwrote the original.
+  // P-∞：用 ref 记录"上一帧的 graph 引用"，只有外部 graph 变化才同步到 React Flow，
+  // 防止 setNodes → useEffect([nodes]) → setGraph → useEffect([graph]) → setNodes 死循环
+  // P-∞: use a ref to track the last graph reference; only sync to React Flow when
+  // graph changes from the outside, breaking the potential setNodes → nodes→graph → graph → setNodes cycle
+  const lastGraphRef = useRef<WorkflowGraph | null>(null)
   useEffect(() => {
-    setNodes(initNodes);
-    setEdges(initEdges);
-    // 只在外部 graph 变化时同步，避免与 nodes→graph effect 死循环
-    // Only sync on external graph changes to avoid an infinite loop with nodes→graph
+    if (lastGraphRef.current === graph) return
+    lastGraphRef.current = graph
+    setNodes(initNodes)
+    setEdges(initEdges)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
+  }, [graph])
 
   // 显式标注 setNodes / setEdges 回调类型（避免 useMemo 推断失效 → any）
   // Explicitly annotate setNodes / setEdges callback types
@@ -218,7 +223,7 @@ export default function WorkflowEditor() {
     // 找不到 wf 视为新建：name/description 已由 URL 预填，graph 保持空
     // Not found ⇒ new: name/description already pre-filled from the URL; graph stays empty
     setLoadingWf(false);
-  }, [id, workflows, load]);
+  }, [id, load]);
 
   // React Flow nodes/edges 同步回 graph
   // Sync React Flow nodes/edges back into the graph
