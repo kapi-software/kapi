@@ -127,6 +127,17 @@ export default function WorkflowEditor() {
   const [searchParams] = useSearchParams();
   const prefilledName = searchParams.get("name") ?? "";
   const prefilledDescription = searchParams.get("description") ?? "";
+  // P6：从模板 URL 解析预填 graph（来自 NewWorkflowDialog 向导）
+  // P6: parse prefilled graph from template URL (set by NewWorkflowDialog wizard)
+  const prefilledGraph = useMemo<WorkflowGraph | null>(() => {
+    const raw = searchParams.get("graph");
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as WorkflowGraph;
+    } catch {
+      return null;
+    }
+  }, [searchParams]);
 
   const { workflows, load, save, run } = useWorkflowsStore();
   const { plugins } = usePluginsStore();
@@ -140,7 +151,9 @@ export default function WorkflowEditor() {
   // Form state
   const [name, setName] = useState(prefilledName);
   const [description, setDescription] = useState(prefilledDescription);
-  const [graph, setGraph] = useState<WorkflowGraph>(EMPTY_GRAPH);
+  // P6：初始 graph 来自模板（或空白）；保存后 store 的 graph 接管
+  // P6: initial graph comes from template (or blank); store takes over after save
+  const [graph, setGraph] = useState<WorkflowGraph>(prefilledGraph ?? EMPTY_GRAPH);
   const [loadingWf, setLoadingWf] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
