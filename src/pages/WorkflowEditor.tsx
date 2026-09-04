@@ -11,6 +11,7 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type XYPosition,
   Background,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -71,14 +72,14 @@ function isStructuredAction(action: { inputs?: Record<string, unknown>; outputs?
 // WorkflowNode → React Flow Node (appends data, doesn't move position)
 // P5: display_name 透传
 // P5: display_name passthrough
-function graphNodeToRfNode(n: WorkflowNode, pos?: { x: number; y: number }): Node {
+function graphNodeToRfNode(n: WorkflowNode, pos?: XYPosition): Node {
   return {
     id: n.id,
     type: n.type,
     // P-∞: 位置直接引用（避免 position.newObj !== prevNode.position 的浅比等问题）
     // Position is passed by reference to avoid shallow inequality in setGraph checks.
     // Persistent position changes are handled by the drag callback (onNodesChange).
-    position: pos ?? n.position,
+    position: pos ?? n.position ?? { x: 0, y: 0 },
     data: {
       type: n.type,
       plugin_id: n.plugin_id ?? "",
