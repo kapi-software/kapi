@@ -26,7 +26,7 @@ import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
 import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
 import { validateConnection } from "@/lib/workflow-connection";
-import { isStructuredField, type Workflow, type WorkflowEdge, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
+import { isStructuredField, type Workflow, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
 import { ActionConfigForm } from "@/components/workflow/ActionConfigForm";
@@ -170,10 +170,9 @@ export default function WorkflowEditor() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
 
-  // 实时校验：graph 每次变化重算错误列表
-  // Live validation: recompute errors on every graph change
-  const validationErrors = useMemo<GraphError[]>(() => validateGraph(graph), [graph]);
-  const hasFatal = hasFatalErrors(validationErrors);
+  // 实时校验：从 React Flow 的 nodes/edges 构造 live graph 再校验（不再依赖自动同步 effect）
+  // Live validation: build a live graph from React Flow state and validate
+  // 移到 React Flow state 声明之后 / Moved below React Flow state declaration
 
   // React Flow 状态
   // React Flow state
@@ -184,6 +183,22 @@ export default function WorkflowEditor() {
   const { initNodes, initEdges } = useMemo(() => graphToRfState(graph), [graph]);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initEdges);
+
+  // 实时校验：从 React Flow 的 nodes/edges 构造 live graph 再校验（不再依赖自动同步 effect）
+  // Live validation: build a live graph from React Flow state and validate
+  const validationErrors = useMemo<GraphError[]>(() => {
+    const liveGraph: WorkflowGraph = {
+      nodes: nodes.map((n) => rfNodeToGraphNode(n)),
+      edges: edges.map((e) => ({
+        from: e.source,
+        to: e.target,
+        map: (e.data as { map?: Record<string, string> } | undefined)?.map,
+      })),
+      bindings: graph.bindings,
+    }
+    return validateGraph(liveGraph)
+  }, [nodes, edges, graph.bindings]);
+  const hasFatal = hasFatalErrors(validationErrors);
 
   // 同步 store graph → React Flow（load 完成后用最新 graph 全量替换）
   // Sync store graph → React Flow (full replace after the loader effect sets graph)
@@ -238,40 +253,14 @@ export default function WorkflowEditor() {
 
   // React Flow nodes/edges 同步回 graph
   // Sync React Flow nodes/edges back into the graph
-  // P-∞: React Flow's useNodesState returns a NEW array reference on every
-  // setNodes (even no-op), so a simple `===` compare would trigger feedback.
-  // Instead compare each item's data (mutated by the inspector) and id
-  // (immutable) to decide whether graph actually needs an update.
-  useEffect(() => {
-    // 浅比较 data + id；position 变化不触发（保存时再取）
-    // Shallow-compare data + id; position changes don't trigger (taken on save)
-    const same =
-      nodes.length === graph.nodes.length &&
-      nodes.every((n, i) => {
-        const gn = graph.nodes[i]
-        const data = n.data as { type?: string; plugin_id?: string; action?: string; config?: Record<string, unknown>; display_name?: string }
-        return gn && gn.id === n.id && gn.display_name === data.display_name
-          && gn.plugin_id === data.plugin_id && gn.action === data.action
-          && JSON.stringify(gn.config) === JSON.stringify(data.config)
-          && gn.type === data.type
-      }) &&
-      edges.length === graph.edges.length &&
-      edges.every((e, i) => {
-        const ge = graph.edges[i]
-        return ge && ge.from === e.source && ge.to === e.target
-          && JSON.stringify(ge.map) === JSON.stringify((e.data as { map?: Record<string, string> } | undefined)?.map)
-      })
-    if (same) return
-    const gNodes = nodes.map((n) => rfNodeToGraphNode(n));
-    // P1：序列化 edge.data.map —— 用户连线时按 manifest 自动填的默认映射
-    // P1: serialize edge.data.map — defaults filled in on connect per manifest
-    const gEdges: WorkflowEdge[] = edges.map((e) => ({
-      from: e.source,
-      to: e.target,
-      map: (e.data as { map?: Record<string, string> } | undefined)?.map,
-    }));
-    setGraph((prev) => ({ ...prev, nodes: gNodes, edges: gEdges }));
-  }, [nodes, edges, graph]);
+  // P-∞ DISABLED: 之前通过 effect 持续同步，触发 React Flow 内部 store 与
+  // 本地 graph state 之间的 feedback loop（双击节点崩溃、编辑崩溃）
+  // 改为：所有用户显式操作（onUpdate / onConnect / onDrop / onDelete）直接调 setGraph，
+  // 拖动节点位置由 onNodesChange 处理（位置由 onSave 时整体序列化）
+  // P-∞ DISABLED: the previous effect-based sync triggered a feedback loop
+  // (crash on double-click, crash on edit). Now user actions write to graph directly;
+  // drag-position is captured at onSave time via onNodesChange + rfNodeToGraphNode.
+  // useEffect(() => { ... }, [nodes, edges, graph])
 
   // 从左侧面板拖入新节点
   // Drop a new node from the left palette
@@ -306,7 +295,7 @@ export default function WorkflowEditor() {
       // 注释掉即可避免双击节点崩溃（用户实测确认）
       // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
       // commenting it out avoids the double-click crash (user-verified)
-      // setSelectedNodeId(newNode.id);
+      setSelectedNodeId(newNode.id);
     },
     [setNodesTyped, plugins, graph.nodes.length],
   );
@@ -330,7 +319,7 @@ export default function WorkflowEditor() {
     setNodesTyped((ns: Node[]) => [...ns, newNode]);
     // P-∞: setSelectedNodeId 同样跳过（避免双击数据转换节点崩溃）
     // P-∞: same here (avoid crash on double-click of transform node)
-    // setSelectedNodeId(newNode.id);
+    setSelectedNodeId(newNode.id);
   }, [setNodesTyped, graph.nodes.length]);
 
   // 在画布上连线（React Flow 内置行为）
@@ -435,11 +424,22 @@ export default function WorkflowEditor() {
     }
     setSaving(true);
     try {
+      // P-∞: 从 React Flow 的 nodes/edges 重新构造 graph（不再依赖自动同步 effect）
+      // P-∞: rebuild graph from React Flow's nodes/edges (no auto-sync effect)
+      const liveGraph: WorkflowGraph = {
+        nodes: nodes.map((n) => rfNodeToGraphNode(n)),
+        edges: edges.map((e) => ({
+          from: e.source,
+          to: e.target,
+          map: (e.data as { map?: Record<string, string> } | undefined)?.map,
+        })),
+        bindings: graph.bindings,
+      };
       const wf: Workflow = {
         id: isNew ? `wf-${shortId()}` : (id ?? ""),
         name: name.trim(),
         description: description.trim() || null,
-        graph,
+        graph: liveGraph,
         schema_version: 1,
         is_enabled: true,
         created_at: "",
