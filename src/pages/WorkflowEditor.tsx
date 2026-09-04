@@ -52,6 +52,9 @@ function rfNodeToGraphNode(n: Node): WorkflowNode {
     // 保留 position：拖动节点会修改 n.position，需要落库
     // Keep position: dragging modifies n.position, must be persisted
     position: { x: n.position.x, y: n.position.y },
+    // P5: 透传 display_name
+    // P5: pass through display_name
+    display_name: (n.data?.display_name as string | undefined) || undefined,
   };
 }
 
@@ -75,6 +78,9 @@ function graphNodeToRfNode(n: WorkflowNode, pos?: { x: number; y: number }): Nod
       plugin_id: n.plugin_id ?? "",
       action: n.action ?? "",
       config: n.config ?? {},
+      // P5: 透传 display_name
+      // P5: pass through display_name
+      display_name: n.display_name ?? "",
     },
   };
 }
@@ -236,30 +242,55 @@ export default function WorkflowEditor() {
   // Drop a new node from the left palette
   const onDrop = useCallback(
     (pluginId: string, actionName: string) => {
+      // P5: 默认 display_name 推断
+      // P5: default display_name inference
+      // 优先 action.summary，否则用 "步骤 N" 形式（按当前 graph 节点数 + 1）
+      // Prefer action.summary, else "Step N" (current node count + 1)
+      const plugin = plugins.find((p) => p.id === pluginId)
+      const action = plugin?.manifest?.workflow?.actions?.find(
+        (a) => a.name === actionName,
+      )
+      const summary = action?.summary?.trim()
+      const stepNumber = graph.nodes.length + 1
+      const defaultName = summary || `步骤 ${stepNumber}`
+
       const newNode: Node = {
         id: nextNodeId(),
         type: "plugin",
         position: { x: 250 + Math.random() * 100, y: 200 + Math.random() * 60 },
-        data: { type: "plugin", plugin_id: pluginId, action: actionName, config: {} },
+        data: {
+          type: "plugin",
+          plugin_id: pluginId,
+          action: actionName,
+          config: {},
+          display_name: defaultName,
+        },
       };
       setNodesTyped((ns: Node[]) => [...ns, newNode]);
       setSelectedNodeId(newNode.id);
     },
-    [setNodesTyped],
+    [setNodesTyped, plugins, graph.nodes.length],
   );
 
   // 添加 Transform 节点
   // Add a Transform node
   const onDropTransform = useCallback(() => {
+    const stepNumber = graph.nodes.length + 1;
     const newNode: Node = {
       id: nextNodeId(),
       type: "transform",
       position: { x: 250 + Math.random() * 100, y: 200 + Math.random() * 60 },
-      data: { type: "transform", plugin_id: "", action: "", config: { template: '{\n  "output": "{{input}}"}\n' } },
+      data: {
+        type: "transform",
+        plugin_id: "",
+        action: "",
+        config: { template: '{\n  "output": "{{input}}"}\n' },
+        display_name: `步骤 ${stepNumber}`,
+      },
     };
     setNodesTyped((ns: Node[]) => [...ns, newNode]);
     setSelectedNodeId(newNode.id);
-  }, [setNodesTyped]);
+  }, [setNodesTyped, graph.nodes.length]);
 
   // 在画布上连线（React Flow 内置行为）
   // Connect nodes on the canvas (React Flow built-in behavior)
@@ -616,6 +647,20 @@ function NodeInspector({
             </Label>
             <Input className="h-7 font-mono text-xs" value={node.id} readOnly />
           </div>
+
+          {/* P5: 可编辑显示名 */}
+          {/* P5: editable display name */}
+          {!isTransform && (
+            <div className="space-y-0.5">
+              <Label className="text-[10px] text-muted-foreground">显示名称</Label>
+              <Input
+                className="h-7 text-xs"
+                value={(node.data.display_name as string) ?? ""}
+                onChange={(e) => onUpdate({ display_name: e.target.value || undefined })}
+                placeholder="留空使用默认名称"
+              />
+            </div>
+          )}
 
           {isTransform ? (
             /* Transform 节点：只显示模板编辑器 */

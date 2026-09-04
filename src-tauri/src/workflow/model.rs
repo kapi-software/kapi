@@ -97,6 +97,10 @@ pub struct WorkflowNode {
     pub action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
+    /// P5: 可编辑显示名（前端用户自定义；未设时用 action.summary 或 "步骤 N"）
+    /// P5: editable display name (frontend user override; falls back to action.summary / "Step N")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

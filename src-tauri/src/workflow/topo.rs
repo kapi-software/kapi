@@ -334,6 +334,7 @@ mod tests {
             plugin_id: Some("p".to_string()),
             action: Some("a".to_string()),
             config: Some(json!({})),
+            display_name: None,
         }
     }
 

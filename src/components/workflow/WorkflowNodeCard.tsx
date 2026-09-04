@@ -2,9 +2,19 @@
 // React Flow custom plugin node: node id + plugin name + action name + input/output summary
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
+// 节点主标题：有 display_name 则优先显示；无则回退
+// Node title: display_name > plugin_id (raw id)
+function NodeTitle({ data }: { data: Record<string, unknown> }) {
+  const displayName = (data?.display_name as string | undefined) || "";
+  const pluginId = (data?.plugin_id as string) ?? "";
+  if (displayName) {
+    return <div className="truncate font-medium">{displayName}</div>;
+  }
+  return <div className="truncate font-medium">{pluginId || "—"}</div>;
+}
+
 export function WorkflowNodeCard({ data, selected }: NodeProps) {
   const nodeType = (data?.type as string) ?? "plugin";
-  const pluginId = (data?.plugin_id as string) ?? "";
   const action = (data?.action as string) ?? "";
   const isTransform = nodeType === "transform";
 
@@ -34,7 +44,9 @@ export function WorkflowNodeCard({ data, selected }: NodeProps) {
             </div>
           )}
         </div>
-        <div className="truncate font-medium">{isTransform ? "JSON Template" : (pluginId || "—")}</div>
+        <div className="truncate font-medium">
+          {isTransform ? <NodeTitle data={data as Record<string, unknown>} /> : <NodeTitle data={data as Record<string, unknown>} />}
+        </div>
         <div className="truncate font-mono text-muted-foreground">
           {isTransform ? "数据映射" : (action || "—")}
         </div>
