@@ -11,7 +11,6 @@ import {
   type Connection,
   type Node,
   type Edge,
-  type XYPosition,
   Background,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -26,7 +25,7 @@ import { isTauri } from "@/lib/tauri";
 import { shortId } from "@/lib/id";
 import { validateGraph, hasFatalErrors } from "@/lib/workflow-graph";
 import { validateConnection } from "@/lib/workflow-connection";
-import { isStructuredField, type Workflow, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
+import { CURRENT_GRAPH_VERSION, type Workflow, type WorkflowGraph, type WorkflowNode, type GraphError } from "@/types";
 import { WorkflowNodeCard } from "@/components/workflow/WorkflowNodeCard";
 import { NodePalette } from "@/components/workflow/NodePalette";
 import { ActionConfigForm } from "@/components/workflow/ActionConfigForm";
@@ -35,14 +34,7 @@ import { ActionConfigForm } from "@/components/workflow/ActionConfigForm";
 // Default node type registry (for React Flow custom nodes)
 const nodeTypes = { plugin: WorkflowNodeCard, transform: WorkflowNodeCard };
 
-// 空 graph：起点
-// Empty graph: starting point for new workflows
-const EMPTY_GRAPH: WorkflowGraph = {
-  nodes: [],
-  edges: [],
-  bindings: [],
-};
-
+// React Flow Node → WorkflowNode
 // React Flow Node → WorkflowNode
 function rfNodeToGraphNode(n: Node): WorkflowNode {
   return {
@@ -54,65 +46,46 @@ function rfNodeToGraphNode(n: Node): WorkflowNode {
     // 保留 position：拖动节点会修改 n.position，需要落库
     // Keep position: dragging modifies n.position, must be persisted
     position: { x: n.position.x, y: n.position.y },
-    // P5: 透传 display_name
-    // P5: pass through display_name
     display_name: (n.data?.display_name as string | undefined) || undefined,
   };
 }
 
-// 检测 manifest action 是否有结构化 schema（v2）—— 至少一个 input/output 含 type 字段
-// Detect whether a manifest action has structured schema (v2) — at least one input/output has a `type` field
-function isStructuredAction(action: { inputs?: Record<string, unknown>; outputs?: Record<string, unknown> }): boolean {
-  const hasStructured = (map: Record<string, unknown> | undefined) =>
-    !!map && Object.values(map).some((v) => isStructuredField(v))
-  return hasStructured(action.inputs) || hasStructured(action.outputs)
+// React Flow 状态 → WorkflowGraph（实时校验与保存共用同一派生逻辑）
+// React Flow state → WorkflowGraph (validation and save share the same derivation)
+function rfToGraph(nodes: Node[], edges: Edge[]): WorkflowGraph {
+  return {
+    nodes: nodes.map((n) => rfNodeToGraphNode(n)),
+    edges: edges.map((e) => ({
+      from: e.source,
+      to: e.target,
+      map: (e.data as { map?: Record<string, string> } | undefined)?.map,
+    })),
+  };
 }
 
-// WorkflowNode → React Flow Node（仅追加 data，不改 position）
-// WorkflowNode → React Flow Node (appends data, doesn't move position)
-// P5: display_name 透传
-// P5: display_name passthrough
-function graphNodeToRfNode(n: WorkflowNode, pos?: XYPosition): Node {
+// WorkflowNode → React Flow Node（仅追加 data，position 原样引用）
+// WorkflowNode → React Flow Node (appends data; position passed through)
+function graphNodeToRfNode(n: WorkflowNode): Node {
   return {
     id: n.id,
     type: n.type,
-    // P-∞: 位置直接引用（避免 position.newObj !== prevNode.position 的浅比等问题）
-    // Position is passed by reference to avoid shallow inequality in setGraph checks.
-    // Persistent position changes are handled by the drag callback (onNodesChange).
-    position: pos ?? n.position ?? { x: 0, y: 0 },
+    position: n.position,
     data: {
       type: n.type,
       plugin_id: n.plugin_id ?? "",
       action: n.action ?? "",
       config: n.config ?? {},
-      // P5: 透传 display_name
-      // P5: pass through display_name
       display_name: n.display_name ?? "",
     },
   };
 }
 
-// 从已有 graph 初始化 React Flow nodes/edges
-// Initialize React Flow nodes/edges from an existing graph
-// 优先用存的 position（v2 起节点位置落库），没有才网格排
-// Prefer persisted position (since v2, positions are persisted); fall back to grid layout
+// 从已有 graph 生成 React Flow nodes/edges（初始化时一次性调用）
+// Build React Flow nodes/edges from a graph (one-shot at initialization)
 function graphToRfState(graph: WorkflowGraph): { initNodes: Node[]; initEdges: Edge[] } {
-  // 用网格布局给节点分配位置（仅在无 position 时使用）
-  // Assign positions using a simple grid layout (only when no position is stored)
-  const COLS = 3;
-  const initNodes: Node[] = graph.nodes.map((n, i) => {
-    // 有持久化位置：直接用；没有：造新网格位置
-    // If persisted position exists: use it; otherwise: create new grid position
-    if (n.position) {
-      return graphNodeToRfNode(n);
-    }
-    return graphNodeToRfNode(n, {
-      x: (i % COLS) * 280,
-      y: Math.floor(i / COLS) * 120,
-    });
-  });
-  // P1：加载已保存工作流时反序列化 edge.map
-  // P1: deserialize edge.map when loading saved workflow
+  const initNodes: Node[] = graph.nodes.map((n) => graphNodeToRfNode(n));
+  // 反序列化 edge.map（加载已保存工作流时还原连线上的数据映射）
+  // Deserialize edge.map (restore data routing on edges when loading a saved workflow)
   const initEdges: Edge[] = graph.edges.map((e, i) => ({
     id: `e-${i}`,
     source: e.from,
@@ -139,8 +112,8 @@ export default function WorkflowEditor() {
   const [searchParams] = useSearchParams();
   const prefilledName = searchParams.get("name") ?? "";
   const prefilledDescription = searchParams.get("description") ?? "";
-  // P6：从模板 URL 解析预填 graph（来自 NewWorkflowDialog 向导）
-  // P6: parse prefilled graph from template URL (set by NewWorkflowDialog wizard)
+  // 从模板 URL 解析预填 graph（来自 NewWorkflowDialog 向导）
+  // Parse prefilled graph from template URL (set by NewWorkflowDialog wizard)
   const prefilledGraph = useMemo<WorkflowGraph | null>(() => {
     const raw = searchParams.get("graph");
     if (!raw) return null;
@@ -151,79 +124,81 @@ export default function WorkflowEditor() {
     }
   }, [searchParams]);
 
-  const { workflows, load, save, run } = useWorkflowsStore();
-  const { plugins } = usePluginsStore();
+  const { workflows, load: loadWorkflows, save, run } = useWorkflowsStore();
+  const { plugins, load: loadPlugins } = usePluginsStore();
+
+  // 数据就绪标志：workflows + plugins 都加载完才初始化编辑器（刷新后 store 是空的）
+  // Hydration flag: the editor initializes only after BOTH stores are loaded
+  // (after a page refresh both stores start empty)
+  const [hydrated, setHydrated] = useState(false);
+  const [loadingWf, setLoadingWf] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  // 表单状态
+  // Form state
+  const [name, setName] = useState(prefilledName);
+  const [description, setDescription] = useState(prefilledDescription);
+
+  // React Flow 状态：唯一活跃数据源。
+  // React Flow state: THE single source of truth.
+  // 不再维护独立的 graph state —— 之前的 graph↔nodes 双状态同步 effect 会用
+  // 过期的 initNodes 覆盖画布，导致节点位置重叠、用户编辑丢失。
+  // No separate graph state anymore — the old two-way sync effect overwrote the
+  // canvas with stale initNodes, scrambling node positions and losing edits.
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // 一次性初始化守卫：防止 store 后续刷新（如 save 内部 load()）冲掉编辑中的内容
+  // One-shot init guard: later store refreshes (e.g. load() inside save) never clobber edits
+  const initializedRef = useRef(false);
+  const hydrateStartedRef = useRef(false);
+
+  // 挂载时并行加载 workflows + plugins（两者就绪前渲染 loading）
+  // On mount load workflows + plugins in parallel (render loading until both settle)
+  useEffect(() => {
+    if (hydrateStartedRef.current) return;
+    hydrateStartedRef.current = true;
+    setLoadingWf(true);
+    Promise.all([loadWorkflows(), loadPlugins()])
+      .catch(() => {
+        // 非 Tauri 环境必然失败：也解除 loading，让编辑器以空数据可用
+        // Non-Tauri environments always fail: clear loading anyway so the editor stays usable
+      })
+      .finally(() => {
+        setLoadingWf(false);
+        setHydrated(true);
+      });
+  }, [loadWorkflows, loadPlugins]);
+
+  // 初始化（只跑一次）：数据就绪后用 store 里的工作流或 URL 模板预填画布
+  // One-shot initialization: prefill the canvas from the store or URL template once hydrated
+  useEffect(() => {
+    if (!hydrated || initializedRef.current) return;
+    initializedRef.current = true;
+    const wf = workflows.find((w) => w.id === id);
+    const source = wf ? wf.graph : prefilledGraph;
+    if (wf) {
+      setName(wf.name);
+      setDescription(wf.description ?? "");
+    }
+    if (source) {
+      const { initNodes, initEdges } = graphToRfState(source);
+      setNodes(initNodes);
+      setEdges(initEdges);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
 
   // 新建/编辑判断：id 在 store 中找不到即为新建（保存前）
   // isNew: id not yet in the store (before first save)
   const existingWf = workflows.find((w) => w.id === id);
   const isNew = !existingWf;
 
-  // 表单状态
-  // Form state
-  const [name, setName] = useState(prefilledName);
-  const [description, setDescription] = useState(prefilledDescription);
-  // P6：初始 graph 来自模板（或空白）；保存后 store 的 graph 接管
-  // P6: initial graph comes from template (or blank); store takes over after save
-  const [graph, setGraph] = useState<WorkflowGraph>(prefilledGraph ?? EMPTY_GRAPH);
-  const [loadingWf, setLoadingWf] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
-
-  // 实时校验：从 React Flow 的 nodes/edges 构造 live graph 再校验（不再依赖自动同步 effect）
-  // Live validation: build a live graph from React Flow state and validate
-  // 移到 React Flow state 声明之后 / Moved below React Flow state declaration
-
-  // React Flow 状态
-  // React Flow state
-  // 注意：useMemo 不能用空依赖 []，否则打开已保存工作流时 initNodes 永远是空图（mount 时的 graph 几乎都是 EMPTY_GRAPH）。
-  // 这里以 graph 引用作为依赖：graph 一旦被 useEffect 146 行从 store 加载进 setGraph，graphToRfState 立即重算。
-  // NOTE: useMemo cannot use [] dep — otherwise initNodes stays the empty graph captured on mount.
-  // graph is the dep: once the loader effect (line ~146) calls setGraph(wf.graph), this recomputes.
-  const { initNodes, initEdges } = useMemo(() => graphToRfState(graph), [graph]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initEdges);
-
-  // 实时校验：从 React Flow 的 nodes/edges 构造 live graph 再校验（不再依赖自动同步 effect）
-  // Live validation: build a live graph from React Flow state and validate
-  const validationErrors = useMemo<GraphError[]>(() => {
-    const liveGraph: WorkflowGraph = {
-      nodes: nodes.map((n) => rfNodeToGraphNode(n)),
-      edges: edges.map((e) => ({
-        from: e.source,
-        to: e.target,
-        map: (e.data as { map?: Record<string, string> } | undefined)?.map,
-      })),
-      bindings: graph.bindings,
-    }
-    return validateGraph(liveGraph)
-  }, [nodes, edges, graph.bindings]);
+  // 实时校验：直接从 React Flow 状态派生 graph 再校验（单一数据源，无同步 effect）
+  // Live validation: derive the graph straight from React Flow state (single source, no sync effect)
+  const liveGraph = useMemo(() => rfToGraph(nodes, edges), [nodes, edges]);
+  const validationErrors = useMemo<GraphError[]>(() => validateGraph(liveGraph), [liveGraph]);
   const hasFatal = hasFatalErrors(validationErrors);
-
-  // 同步 store graph → React Flow：只在**外部** graph 改变时同步（如 store load 完）
-  // Sync store graph → React Flow: only on EXTERNAL graph changes
-  // （如打开已有工作流、模板预填）
-  // 用户显式操作（onDrop / onConnect / updateSelectedNode）已直接更新 graph state，
-  // 不再需要从 React Flow 同步到 graph（避免死循环与覆盖用户编辑）
-  // User actions (onDrop / onConnect / updateSelectedNode) already write to
-  // graph state; syncing back from React Flow would overwrite edits.
-  // 关键：line 213-215 的 setNodes(initNodes) 会用 stale initNodes 覆盖用户编辑，必须禁掉
-  // Critical: the setNodes(initNodes) below would overwrite user edits; we skip it.
-  const lastGraphRef = useRef<WorkflowGraph | null>(null)
-  useEffect(() => {
-    if (lastGraphRef.current === graph) return
-    lastGraphRef.current = graph
-    // P-∞: 检测 React Flow 内部是否已经有 graph 之外的节点（用户已添加的）
-    // Detect if React Flow already has nodes beyond what's in graph (user-added)
-    const userAdded = nodes.length > graph.nodes.length
-    if (userAdded) {
-      // 不覆盖用户编辑 / Don't overwrite user edits
-      return
-    }
-    setNodes(initNodes)
-    setEdges(initEdges)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph])
 
   // 显式标注 setNodes / setEdges 回调类型（避免 useMemo 推断失效 → any）
   // Explicitly annotate setNodes / setEdges callback types
@@ -238,53 +213,18 @@ export default function WorkflowEditor() {
     [nodes, selectedNodeId],
   );
 
-  // 加载工作流：store 里能找到 → 编辑模式；找不到 → 新建（用 URL 预填值）
-  // Load workflow: found in the store → edit mode; otherwise → new (pre-fill from URL)
-  useEffect(() => {
-    setLoadingWf(true);
-    if (workflows.length === 0) {
-      load().then(() => setLoadingWf(false));
-      return;
-    }
-    const wf = workflows.find((w) => w.id === id) ?? null;
-    if (wf) {
-      // 新 graph 引用，触发 useMemo([graph]) 重算 + graph→nodes effect 全量替换
-      // New graph reference triggers useMemo([graph]) recompute + graph→nodes full replace
-      setName(wf.name);
-      setDescription(wf.description ?? "");
-      setGraph({ ...wf.graph, nodes: [...wf.graph.nodes], edges: [...wf.graph.edges], bindings: [...wf.graph.bindings] });
-    }
-    // 找不到 wf 视为新建：name/description 已由 URL 预填，graph 保持空
-    // Not found ⇒ new: name/description already pre-filled from the URL; graph stays empty
-    setLoadingWf(false);
-  }, [id, load]);
-
-  // React Flow nodes/edges 同步回 graph
-  // Sync React Flow nodes/edges back into the graph
-  // P-∞ DISABLED: 之前通过 effect 持续同步，触发 React Flow 内部 store 与
-  // 本地 graph state 之间的 feedback loop（双击节点崩溃、编辑崩溃）
-  // 改为：所有用户显式操作（onUpdate / onConnect / onDrop / onDelete）直接调 setGraph，
-  // 拖动节点位置由 onNodesChange 处理（位置由 onSave 时整体序列化）
-  // P-∞ DISABLED: the previous effect-based sync triggered a feedback loop
-  // (crash on double-click, crash on edit). Now user actions write to graph directly;
-  // drag-position is captured at onSave time via onNodesChange + rfNodeToGraphNode.
-  // useEffect(() => { ... }, [nodes, edges, graph])
-
-  // 从左侧面板拖入新节点
-  // Drop a new node from the left palette
+  // 从左侧面板拖入新节点（只更新 React Flow 状态 —— 单一数据源）
+  // Drop a new node from the left palette (React Flow state only — single source)
   const onDrop = useCallback(
     (pluginId: string, actionName: string) => {
-      // P5: 默认 display_name 推断
-      // P5: default display_name inference
-      // 优先 action.summary，否则用 "步骤 N" 形式（按当前 graph 节点数 + 1）
-      // Prefer action.summary, else "Step N" (current node count + 1)
+      // 默认 display_name：优先 action.summary，否则用 "步骤 N"（按当前节点数 + 1）
+      // Default display_name: prefer action.summary, else "Step N" (node count + 1)
       const plugin = plugins.find((p) => p.id === pluginId)
       const action = plugin?.manifest?.workflow?.actions?.find(
         (a) => a.name === actionName,
       )
       const summary = action?.summary?.trim()
-      const stepNumber = graph.nodes.length + 1
-      const defaultName = summary || `步骤 ${stepNumber}`
+      const defaultName = summary || `步骤 ${nodes.length + 1}`
 
       const newNode: Node = {
         id: nextNodeId(),
@@ -299,37 +239,14 @@ export default function WorkflowEditor() {
         },
       };
       setNodesTyped((ns: Node[]) => [...ns, newNode]);
-      // P-∞: 同步更新 graph state，否则刷新后 useEffect([graph]) 用旧 initNodes 覆盖 React Flow store
-      // P-∞: keep graph state in sync; otherwise useEffect([graph]) overwrites the
-      // React Flow store with stale initNodes on remount / refresh
-      setGraph((prev) => ({
-        ...prev,
-        nodes: [
-          ...prev.nodes,
-          {
-            id: newNode.id,
-            type: newNode.type as "plugin" | "transform",
-            plugin_id: newNode.data?.plugin_id as string ?? "",
-            action: newNode.data?.action as string ?? "",
-            config: newNode.data?.config as Record<string, unknown> ?? {},
-            position: { x: newNode.position.x, y: newNode.position.y },
-            display_name: newNode.data?.display_name as string | undefined,
-          },
-        ],
-      }));
-      // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
-      // 注释掉即可避免双击节点崩溃（用户实测确认）
-      // P-∞: setSelectedNodeId triggers a setState cycle through NodeInspector;
-      // commenting it out avoids the double-click crash (user-verified)
       setSelectedNodeId(newNode.id);
     },
-    [setNodesTyped, plugins, graph.nodes.length, setGraph],
+    [setNodesTyped, plugins, nodes.length],
   );
 
   // 添加 Transform 节点
   // Add a Transform node
   const onDropTransform = useCallback(() => {
-    const stepNumber = graph.nodes.length + 1;
     const newNode: Node = {
       id: nextNodeId(),
       type: "transform",
@@ -339,45 +256,22 @@ export default function WorkflowEditor() {
         plugin_id: "",
         action: "",
         config: { template: '{\n  "output": "{{input}}"}\n' },
-        display_name: `步骤 ${stepNumber}`,
+        display_name: `步骤 ${nodes.length + 1}`,
       },
     };
     setNodesTyped((ns: Node[]) => [...ns, newNode]);
-    // P-∞: 同步更新 graph state
-    // P-∞: keep graph state in sync
-    setGraph((prev) => ({
-      ...prev,
-      nodes: [
-        ...prev.nodes,
-        {
-          id: newNode.id,
-          type: "transform" as const,
-          plugin_id: "",
-          action: "",
-          config: newNode.data?.config as Record<string, unknown> ?? {},
-          position: { x: newNode.position.x, y: newNode.position.y },
-          display_name: newNode.data?.display_name as string | undefined,
-        },
-      ],
-    }));
-    // P-∞: setSelectedNodeId 同样跳过（避免双击数据转换节点崩溃）
-    // P-∞: same here (avoid crash on double-click of transform node)
     setSelectedNodeId(newNode.id);
-  }, [setNodesTyped, graph.nodes.length, setGraph]);
+  }, [setNodesTyped, nodes.length]);
 
-  // 在画布上连线（React Flow 内置行为）
-  // Connect nodes on the canvas (React Flow built-in behavior)
-  // P1：连线时按 manifest outputs/inputs 自动生成 edge.map（同名字段自动映射）
-  // P1: on connect, auto-generate edge.map per manifest outputs/inputs (same-name auto-map)
-  // P1-2：连接前用 validateConnection 验证（同名输出/输入类型不匹配则拒绝）
-  // P1-2: validate connection before accepting (reject on type mismatch)
+  // 连线校验辅助：按 id 查找 React Flow 节点
+  // Connection helper: find a React Flow node by id
   const findNode = useCallback(
     (id: string) => nodes.find((n) => n.id === id),
     [nodes],
   )
 
-  // 实时校验：拖线过程中显示拒绝
-  // Live validation: react when dragging an edge
+  // 拖线过程中实时拒绝非法连接（自环 + 字段类型不匹配）
+  // Reject invalid connections live during the drag (self-loop + type mismatch)
   const isValidConnection = useCallback(
     (params: Connection | { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
       if (!params.source || !params.target) return false
@@ -394,6 +288,8 @@ export default function WorkflowEditor() {
     [findNode, plugins],
   )
 
+  // 在画布上连线：按 manifest outputs/inputs 自动生成 edge.map（同名字段自动映射）
+  // Connect on the canvas: auto-generate edge.map per manifest outputs/inputs (same-name map)
   const onConnect = useCallback(
     (params: Connection) => {
       const sourceNode = findNode(params.source ?? "")
@@ -416,56 +312,28 @@ export default function WorkflowEditor() {
           {
             ...params,
             type: "default",
-            // 注入 edge.data.map，P1 核心：数据路由信息附着在边上
-            // Inject edge.data.map — P1 core: data routing info lives on the edge
+            // 注入 edge.data.map：数据路由信息附着在边上
+            // Inject edge.data.map: data routing info lives on the edge
             data: Object.keys(r.autoMap).length > 0 ? { map: r.autoMap } : undefined,
           },
           es,
         ),
       )
-      // P-∞: 同步更新 graph state
-      // P-∞: keep graph state in sync
-      setGraph((prev) => {
-        const exists = prev.edges.some(
-          (e) => e.from === params.source && e.to === params.target,
-        )
-        if (exists) return prev
-        return {
-          ...prev,
-          edges: [
-            ...prev.edges,
-            {
-              from: params.source ?? "",
-              to: params.target ?? "",
-              map: Object.keys(r.autoMap).length > 0 ? r.autoMap : undefined,
-            },
-          ],
-        }
-      })
     },
-    [setEdgesTyped, plugins, findNode, setGraph],
+    [setEdgesTyped, plugins, findNode],
   );
 
-  // 删除选中节点
-  // Delete the selected node
+  // 删除选中节点（级联删除相关连线）
+  // Delete the selected node (edges cascade)
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNodeId) return;
     setNodesTyped((ns: Node[]) => ns.filter((n: Node) => n.id !== selectedNodeId));
-    // P1：删边时自动级联删除（edges 携带数据，无需单独清理 bindings）
-    // P1: deleting edges auto-cascades data (edges carry their data; no bindings to clean)
     setEdgesTyped((es: Edge[]) => es.filter((e: Edge) => e.source !== selectedNodeId && e.target !== selectedNodeId));
-    // P-∞: 同步更新 graph state
-    // P-∞: keep graph state in sync
-    setGraph((prev) => ({
-      ...prev,
-      nodes: prev.nodes.filter((n) => n.id !== selectedNodeId),
-      edges: prev.edges.filter((e) => e.from !== selectedNodeId && e.to !== selectedNodeId),
-    }));
     setSelectedNodeId(null);
-  }, [selectedNodeId, setNodesTyped, setEdgesTyped, setGraph]);
+  }, [selectedNodeId, setNodesTyped, setEdgesTyped]);
 
-  // 更新选中节点属性（右侧面板编辑）
-  // Update selected node properties (right panel edit)
+  // 更新选中节点属性（右侧面板编辑，只更新 React Flow 节点 data）
+  // Update selected node properties (right panel edit, React Flow node data only)
   const updateSelectedNode = useCallback(
     (patch: Partial<Node["data"]>) => {
       if (!selectedNodeId) return;
@@ -474,29 +342,12 @@ export default function WorkflowEditor() {
           n.id === selectedNodeId ? { ...n, data: { ...n.data, ...patch } } : n,
         ),
       );
-      // P-∞: 同步更新 graph state（否则刷新时用旧 graph 覆盖新节点）
-      // P-∞: keep graph state in sync (otherwise refresh overwrites the new node)
-      setGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((n) =>
-          n.id === selectedNodeId
-            ? {
-                ...n,
-                display_name: (patch.display_name as string | undefined) ?? n.display_name,
-                plugin_id: (patch.plugin_id as string | undefined) ?? n.plugin_id,
-                action: (patch.action as string | undefined) ?? n.action,
-                config: (patch.config as Record<string, unknown> | undefined) ?? n.config,
-                type: (patch.type as "plugin" | "transform" | undefined) ?? n.type,
-              }
-            : n,
-        ),
-      }));
     },
-    [selectedNodeId, setNodesTyped, setGraph],
+    [selectedNodeId, setNodesTyped],
   );
 
-  // 保存
-  // Save
+  // 保存：从 React Flow 状态派生 graph 落库
+  // Save: derive the graph from React Flow state and persist it
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error(t("workflowEditor.inspector.name") + " — " + t("workflow.dialog.name"));
@@ -510,23 +361,12 @@ export default function WorkflowEditor() {
     }
     setSaving(true);
     try {
-      // P-∞: 从 React Flow 的 nodes/edges 重新构造 graph（不再依赖自动同步 effect）
-      // P-∞: rebuild graph from React Flow's nodes/edges (no auto-sync effect)
-      const liveGraph: WorkflowGraph = {
-        nodes: nodes.map((n) => rfNodeToGraphNode(n)),
-        edges: edges.map((e) => ({
-          from: e.source,
-          to: e.target,
-          map: (e.data as { map?: Record<string, string> } | undefined)?.map,
-        })),
-        bindings: graph.bindings,
-      };
       const wf: Workflow = {
         id: isNew ? `wf-${shortId()}` : (id ?? ""),
         name: name.trim(),
         description: description.trim() || null,
         graph: liveGraph,
-        schema_version: 1,
+        schema_version: CURRENT_GRAPH_VERSION,
         is_enabled: true,
         created_at: "",
         updated_at: "",
@@ -541,11 +381,11 @@ export default function WorkflowEditor() {
     }
   };
 
-  // 运行
-  // Run
+  // 运行：先保存（派生 graph），再触发执行
+  // Run: save first (derived graph), then execute
   const handleRun = async () => {
     if (!name.trim()) {
-      toast.error("请先填写名称");
+      toast.error(t("workflowEditor.inspector.name") + " — " + t("workflow.dialog.name"));
       return;
     }
     if (hasFatal) {
@@ -554,13 +394,12 @@ export default function WorkflowEditor() {
     }
     setRunning(true);
     try {
-      // 先保存
       const wf: Workflow = {
         id: isNew ? `wf-${shortId()}` : (id ?? ""),
         name: name.trim(),
         description: description.trim() || null,
-        graph,
-        schema_version: 1,
+        graph: liveGraph,
+        schema_version: CURRENT_GRAPH_VERSION,
         is_enabled: true,
         created_at: "",
         updated_at: "",
@@ -579,22 +418,12 @@ export default function WorkflowEditor() {
     }
   };
 
-  if (loadingWf) {
+  // 数据未就绪：显示 loading（避免用空画布闪渲染再被覆盖）
+  // Data not ready: show loading (avoids flashing an empty canvas then overwriting it)
+  if (loadingWf || !hydrated) {
     return (
       <div className="flex h-64 items-center justify-center">
         <span className="text-muted-foreground">{t("workflow.loading")}</span>
-      </div>
-    );
-  }
-
-  if (!isNew && !existingWf) {
-    return (
-      <div className="rounded-xl border border-dashed p-10 text-center">
-        <p className="font-medium text-destructive">{t("workflowEditor.notFound")}</p>
-        <Button className="mt-4" variant="outline" onClick={() => navigate("/workflow")}>
-          <Pencil className="size-3.5" />
-          {t("workflowEditor.back")}
-        </Button>
       </div>
     );
   }
@@ -685,8 +514,6 @@ export default function WorkflowEditor() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            // P1-2：拖线过程中拒绝非法连接（自环 + 字段类型不匹配）
-            // P1-2: reject invalid connections during drag (self-loop + type mismatch)
             isValidConnection={isValidConnection}
             onNodeClick={(_e: unknown, n: Node) => setSelectedNodeId(n.id)}
             onPaneClick={() => setSelectedNodeId(null)}
@@ -728,42 +555,12 @@ function NodeInspector({
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const [configText, setConfigText] = useState("");
-  const [configError, setConfigError] = useState<string | null>(null);
-
-  // 节点切换时同步 config 文本
-  // Sync config text when the node changes
-  useEffect(() => {
-    if (!node) return;
-    setConfigText(
-      Object.keys(node.data.config ?? {}).length > 0
-        ? JSON.stringify(node.data.config, null, 2)
-        : "",
-    );
-    setConfigError(null);
-  }, [node?.id]);
-
-  const handleConfigBlur = () => {
-    if (!configText.trim()) {
-      onUpdate({ config: {} });
-      setConfigError(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(configText);
-      if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("must be object");
-      onUpdate({ config: parsed });
-      setConfigError(null);
-    } catch (e) {
-      setConfigError(t("workflowEditor.inspector.configInvalid", { error: String(e) }));
-    }
-  };
 
   // 当前节点的插件定义
   // The plugin manifest for the current node
   const plugin = plugins.find((p) => p.id === node?.data?.plugin_id);
   const actions = plugin?.manifest?.workflow?.actions ?? [];
-  const selectedAction = actions.find((a: { name: string }) => a.name === node?.data?.action);
+  const selectedAction = actions.find((a) => a.name === node?.data?.action);
   const isTransform = node?.data?.type === "transform";
 
   return (
@@ -785,8 +582,8 @@ function NodeInspector({
             <Input className="h-7 font-mono text-xs" value={node.id} readOnly />
           </div>
 
-          {/* P5: 可编辑显示名 */}
-          {/* P5: editable display name */}
+          {/* 可编辑显示名 */}
+          {/* Editable display name */}
           {!isTransform && (
             <div className="space-y-0.5">
               <Label className="text-[10px] text-muted-foreground">显示名称</Label>
@@ -862,7 +659,7 @@ function NodeInspector({
                   disabled={!node.data.plugin_id}
                 >
                   <option value="">{t("workflowEditor.inspector.selectAction")}</option>
-                  {actions.map((a: { name: string }) => (
+                  {actions.map((a) => (
                     <option key={a.name} value={a.name}>
                       {a.name}
                     </option>
@@ -892,31 +689,14 @@ function NodeInspector({
                 </div>
               )}
 
-              {/* 节点配置：按 manifest inputs schema 渲染；v1 老 manifest 回退 JSON textarea */}
-              {/* Node config: render per manifest inputs schema; v1 legacy manifests fall back to JSON textarea */}
-              {selectedAction && isStructuredAction(selectedAction) ? (
+              {/* 节点配置：始终按 manifest inputs schema 渲染结构化表单 */}
+              {/* Node config: always render the schema-driven form per manifest inputs */}
+              {selectedAction && (
                 <ActionConfigForm
                   config={(node.data.config as Record<string, unknown>) ?? {}}
                   inputs={selectedAction.inputs}
                   onChange={(c) => onUpdate({ config: c })}
                 />
-              ) : (
-                <div className="space-y-0.5">
-                  <Label className="text-[10px] text-muted-foreground">
-                    {t("workflowEditor.inspector.config")}
-                  </Label>
-                  <textarea
-                    className="h-20 w-full rounded-md border bg-background px-2 py-1 font-mono text-[10px]"
-                    value={configText}
-                    onChange={(e) => setConfigText(e.target.value)}
-                    onBlur={handleConfigBlur}
-                    placeholder={t("workflowEditor.inspector.configPlaceholder")}
-                    spellCheck={false}
-                  />
-                  {configError && (
-                    <p className="text-[10px] text-destructive">{configError}</p>
-                  )}
-                </div>
               )}
             </>
           )}

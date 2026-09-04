@@ -86,47 +86,6 @@ export interface FieldSpec {
   accept?: string
 }
 
-/** 检测字段描述是否结构化（v2 schema）
- * Detect whether a field descriptor is structured (v2 schema)
- */
-export function isStructuredField(v: unknown): v is FieldSpec {
-  if (typeof v !== 'object' || v === null) return false
-  if (Array.isArray(v)) return false
-  const obj = v as Record<string, unknown>
-  // v2 特征：有 type 字段
-  // v2 trait: has a `type` field
-  return 'type' in obj && typeof obj.type === 'string'
-}
-
-/**
- * 把 v1 (Record<string, string>) 解析为 v2 (Record<string, FieldSpec>)
- * Parse v1 (Record<string, string>) to v2 (Record<string, FieldSpec>)
- *
- * 旧格式例：{ text: "string", mode: "enum" } → 新格式：
- * Old: { text: "string", mode: "enum" } → New:
- * { text: { type: "string" }, mode: { type: "enum" } }
- */
-export function normalizeFieldMap(
-  raw: Record<string, unknown> | undefined,
-): Record<string, FieldSpec> {
-  if (!raw) return {}
-  const out: Record<string, FieldSpec> = {}
-  for (const [key, val] of Object.entries(raw)) {
-    if (isStructuredField(val)) {
-      out[key] = val as FieldSpec
-    } else if (typeof val === 'string') {
-      // v1 形式：key→类型字符串
-      // v1 form: key → type string
-      out[key] = { type: val as FieldType }
-    } else {
-      // 未知形式：当作 json 字段
-      // Unknown form: treat as json
-      out[key] = { type: 'json' }
-    }
-  }
-  return out
-}
-
 // 工作流能力声明（manifest.workflow）
 // Workflow capability declaration in the manifest
 export interface PluginWorkflowSpec {
@@ -134,10 +93,10 @@ export interface PluginWorkflowSpec {
   actions?: Array<{
     name: string
     summary?: string
-    // v2 schema (preferred): Record<key, FieldSpec>
-    // v1 schema (legacy): Record<key, type-string>
-    inputs?: Record<string, unknown>
-    outputs?: Record<string, unknown>
+    // 字段 schema：Record<key, FieldSpec>
+    // Field schema: Record<key, FieldSpec>
+    inputs?: Record<string, FieldSpec>
+    outputs?: Record<string, FieldSpec>
   }>
   events?: string[]
 }
@@ -199,12 +158,9 @@ export interface PluginRow extends Omit<Plugin, 'manifest' | 'window_config' | '
 // DAG graph persisted as JSON in workflows.graph
 export interface WorkflowGraph {
   nodes: WorkflowNode[]
-  // P1：边携带数据映射（upstream output → downstream input）
-  // P1: edges carry data map (upstream output → downstream input)
+  // 边携带数据映射（upstream output → downstream input）
+  // Edges carry the data map (upstream output → downstream input)
   edges: WorkflowEdge[]
-  // 已弃用：保留字段供数据层兼容；引擎不再读
-  // DEPRECATED: kept for DB compatibility; engine no longer reads
-  bindings: DataBinding[]
 }
 
 /** 数据流边：节点 A → 节点 B，map 描述 A 的 outputs 哪些字段喂给 B 的 inputs 哪些字段
@@ -228,19 +184,10 @@ export interface WorkflowNode {
   config?: Record<string, unknown>
   // 画布坐标（React Flow position），打开工作流时还原画布布局
   // Canvas position (React Flow position), restores layout when reopening
-  position?: { x: number; y: number }
+  position: { x: number; y: number }
   // 可编辑显示名（默认按 action.summary / "步骤 N" 推断）
   // Editable display name (defaults to action.summary or "Step N")
   display_name?: string
-}
-
-// 数据绑定：源节点输出 key → 目标节点输入 key
-// Data binding: source output key → target input key
-export interface DataBinding {
-  from: string
-  output: string
-  to: string
-  input: string
 }
 
 // 触发器类型
@@ -285,6 +232,10 @@ export interface WorkflowTrigger {
   is_enabled: boolean
 }
 
+// 当前 graph schema 版本（与 Rust 端 CURRENT_GRAPH_VERSION 对齐）
+// Current graph schema version (mirrors CURRENT_GRAPH_VERSION on the Rust side)
+export const CURRENT_GRAPH_VERSION = 1
+
 // 工作流（解析后，graph 已为对象）
 // Workflow (parsed, graph is an object)
 export interface Workflow {
@@ -292,9 +243,9 @@ export interface Workflow {
   name: string
   description: string | null
   graph: WorkflowGraph
-  // graph schema 版本；缺省视为 0（v0 老数据）
-  // graph schema version; missing treated as 0 (legacy)
-  schema_version?: number
+  // graph schema 版本
+  // graph schema version
+  schema_version: number
   is_enabled: boolean
   created_at: string
   updated_at: string

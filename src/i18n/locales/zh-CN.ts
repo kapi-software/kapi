@@ -184,6 +184,7 @@ export default {
     nodes: '节点',
     edges: '连线',
     bindings: '绑定',
+
     lastRun: '最近运行',
     neverRun: '从未运行',
     status: {

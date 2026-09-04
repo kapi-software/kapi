@@ -334,6 +334,7 @@ mod tests {
             plugin_id: Some("p".to_string()),
             action: Some("a".to_string()),
             config: Some(json!({})),
+            position: crate::workflow::model::Position { x: 0.0, y: 0.0 },
             display_name: None,
         }
     }
@@ -349,7 +350,6 @@ mod tests {
                     map: Default::default(),
                 })
                 .collect(),
-            bindings: vec![],
         }
     }
 

@@ -98,7 +98,7 @@ async fn apply_migrations(pool: &SqlitePool) -> Result<(), String> {
 
 pub async fn workflow_get(pool: &SqlitePool, workflow_id: &str) -> Result<Option<Workflow>, String> {
     let row = sqlx::query(
-        "SELECT id, name, description, graph, is_enabled, created_at, updated_at FROM workflows WHERE id = ?",
+        "SELECT id, name, description, graph, schema_version, is_enabled, created_at, updated_at FROM workflows WHERE id = ?",
     )
     .bind(workflow_id)
     .fetch_optional(pool)
@@ -113,9 +113,7 @@ pub async fn workflow_get(pool: &SqlitePool, workflow_id: &str) -> Result<Option
         name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
         description: row.try_get("description").ok(),
         graph,
-        // 老数据无 schema_version 字段时按 0 处理
-        // Legacy rows without schema_version are treated as v0
-        schema_version: row.try_get("schema_version").unwrap_or(0),
+        schema_version: row.try_get::<i64, _>("schema_version").map_err(|e| format!("StorageError: {e}"))? as i32,
         is_enabled: {
             let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
             v != 0
@@ -127,7 +125,7 @@ pub async fn workflow_get(pool: &SqlitePool, workflow_id: &str) -> Result<Option
 
 pub async fn workflow_list(pool: &SqlitePool) -> Result<Vec<Workflow>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, graph, is_enabled, created_at, updated_at FROM workflows ORDER BY updated_at DESC",
+        "SELECT id, name, description, graph, schema_version, is_enabled, created_at, updated_at FROM workflows ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
     .await
@@ -142,7 +140,7 @@ pub async fn workflow_list(pool: &SqlitePool) -> Result<Vec<Workflow>, String> {
             name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
             description: row.try_get("description").ok(),
             graph,
-            schema_version: row.try_get("schema_version").unwrap_or(0),
+            schema_version: row.try_get::<i64, _>("schema_version").map_err(|e| format!("StorageError: {e}"))? as i32,
             is_enabled: {
                 let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
                 v != 0
@@ -157,16 +155,17 @@ pub async fn workflow_list(pool: &SqlitePool) -> Result<Vec<Workflow>, String> {
 pub async fn workflow_save(pool: &SqlitePool, workflow: &Workflow) -> Result<(), String> {
     let graph_json = serde_json::to_string(&workflow.graph).map_err(|e| format!("InvalidGraph: {e}"))?;
     sqlx::query(
-        "INSERT INTO workflows (id, name, description, graph, is_enabled, updated_at)
-         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        "INSERT INTO workflows (id, name, description, graph, schema_version, is_enabled, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name, description = excluded.description, graph = excluded.graph,
-           is_enabled = excluded.is_enabled, updated_at = CURRENT_TIMESTAMP",
+           schema_version = excluded.schema_version, is_enabled = excluded.is_enabled, updated_at = CURRENT_TIMESTAMP",
     )
     .bind(&workflow.id)
     .bind(&workflow.name)
     .bind(workflow.description.as_deref())
     .bind(&graph_json)
+    .bind(workflow.schema_version as i64)
     .bind(if workflow.is_enabled { 1 } else { 0 })
     .execute(pool)
     .await

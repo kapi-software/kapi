@@ -1,8 +1,8 @@
-// C3-续：人类可读摘要测试
-// C3-续: human-readable summary tests
+// 人类可读摘要测试
+// Human-readable summary tests
 import { describe, it, expect } from 'vitest'
-import { summarizeTriggerConfig, describeCron, summarizeBinding } from './workflow-labels'
-import type { TriggerConfig, DataBinding } from '@/types'
+import { summarizeTriggerConfig, describeCron } from './workflow-labels'
+import type { TriggerConfig } from '@/types'
 
 describe('summarizeTriggerConfig', () => {
   it('schedule: 显示 cron 表达式', () => {
@@ -62,14 +62,3 @@ describe('describeCron', () => {
   })
 })
 
-describe('summarizeBinding', () => {
-  it('A.text → B.content', () => {
-    const b: DataBinding = { from: 'A', output: 'text', to: 'B', input: 'content' }
-    expect(summarizeBinding(b)).toBe('A.text → B.content')
-  })
-
-  it('output 为空：显示 *', () => {
-    const b: DataBinding = { from: 'A', output: '', to: 'B', input: 'content' }
-    expect(summarizeBinding(b)).toBe('A.* → B.content')
-  })
-})

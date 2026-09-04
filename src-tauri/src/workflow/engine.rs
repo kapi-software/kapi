@@ -550,7 +550,7 @@ impl WorkflowEngine {
 
     async fn load_workflow(&self, workflow_id: &str) -> Result<Workflow, String> {
         let row = sqlx::query(
-            "SELECT id, name, description, graph, is_enabled, created_at, updated_at FROM workflows WHERE id = ?",
+            "SELECT id, name, description, graph, schema_version, is_enabled, created_at, updated_at FROM workflows WHERE id = ?",
         )
         .bind(workflow_id)
         .fetch_optional(&self.pool)
@@ -566,7 +566,7 @@ impl WorkflowEngine {
             name: row.try_get("name").map_err(|e| format!("StorageError: {e}"))?,
             description: row.try_get("description").ok(),
             graph,
-            schema_version: row.try_get("schema_version").unwrap_or(0),
+            schema_version: row.try_get::<i64, _>("schema_version").map_err(|e| format!("StorageError: {e}"))? as i32,
             is_enabled: {
                 let v: i64 = row.try_get("is_enabled").map_err(|e| format!("StorageError: {e}"))?;
                 v != 0

@@ -14,13 +14,14 @@ fn make_graph(nodes: Vec<(&str, &str)>, edges: Vec<(&str, &str)>) -> WorkflowGra
                 plugin_id: None,
                 action: None,
                 config: None,
+                position: tauri_app_lib::workflow::model::Position { x: 0.0, y: 0.0 },
+                display_name: None,
             })
             .collect(),
         edges: edges
             .into_iter()
-            .map(|(f, t)| WorkflowEdge { from: f.into(), to: t.into() })
+            .map(|(f, t)| WorkflowEdge { from: f.into(), to: t.into(), map: Default::default() })
             .collect(),
-        bindings: vec![],
     }
 }
 

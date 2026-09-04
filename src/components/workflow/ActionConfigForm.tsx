@@ -1,7 +1,7 @@
-// P2: 结构化动作配置表单（按 manifest inputs schema 渲染）
-// P2: Schema-driven action config form (renders per manifest inputs schema)
+// 结构化动作配置表单（按 manifest inputs schema 渲染）
+// Schema-driven action config form (renders per manifest inputs schema)
 import { useId } from 'react'
-import { normalizeFieldMap, type FieldSpec, type FieldOption } from '@/types'
+import { type FieldSpec, type FieldOption } from '@/types'
 
 // ============================================================
 // Props
@@ -10,8 +10,8 @@ import { normalizeFieldMap, type FieldSpec, type FieldOption } from '@/types'
 export interface ActionConfigFormProps {
   /** 当前 config 值 */
   config: Record<string, unknown>
-  /** manifest.actions[].inputs schema (结构化或 v1 形式都支持) */
-  inputs: Record<string, unknown> | undefined
+  /** manifest.actions[].inputs schema */
+  inputs: Record<string, FieldSpec> | undefined
   /** config 变更回调 */
   onChange: (config: Record<string, unknown>) => void
   /** 禁用态 */
@@ -232,8 +232,8 @@ function JsonField({
 // ============================================================
 
 export function ActionConfigForm({ config, inputs, onChange, disabled }: ActionConfigFormProps) {
-  // 无 schema 时回退空状态
-  // Fallback empty state when no schema
+  // 无 schema 时显示空状态
+  // Empty state when the action declares no inputs
   if (!inputs || Object.keys(inputs).length === 0) {
     return (
       <p className="text-[10px] italic text-muted-foreground">
@@ -242,12 +242,9 @@ export function ActionConfigForm({ config, inputs, onChange, disabled }: ActionC
     )
   }
 
-  const fields = normalizeFieldMap(inputs)
-
   return (
     <div className="space-y-2">
-      {Object.entries(fields).map(([key, spec]) => {
-        const typedSpec: FieldSpec = spec
+      {Object.entries(inputs).map(([key, typedSpec]) => {
         const value = config[key] ?? typedSpec.default
 
         const set = (v: unknown) => {

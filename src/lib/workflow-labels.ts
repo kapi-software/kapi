@@ -1,7 +1,7 @@
-// C3-续：把 trigger / binding config 渲染成人类可读摘要
-// C3-续: render trigger / binding config as human-readable summary
-// 避免在 UI 上直接展示 JSON.stringify(config)（提案 C3）
-import type { TriggerConfig, DataBinding } from '@/types'
+// 触发器 config 渲染成人类可读摘要
+// Render trigger config as a human-readable summary
+// 避免在 UI 上直接展示 JSON.stringify(config)
+import type { TriggerConfig } from '@/types'
 
 /**
  * 触发器 config 摘要
@@ -13,6 +13,11 @@ import type { TriggerConfig, DataBinding } from '@/types'
  */
 export function summarizeTriggerConfig(config: TriggerConfig | Record<string, unknown>): string {
   const cfg = config as Record<string, unknown>
+  // 空 config（如 clipboard 未填 pattern）：任意变化即触发
+  // Empty config (e.g. clipboard without a pattern): triggers on any change
+  if (Object.keys(cfg).length === 0) {
+    return '(任意变化)'
+  }
   if ('cron' in cfg && typeof cfg.cron === 'string') {
     return `cron: ${cfg.cron}`
   }
@@ -63,13 +68,4 @@ export function describeCron(expr: string): string {
     return `每${dayName} ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
   }
   return expr
-}
-
-/**
- * DataBinding 摘要："A.text → B.content"
- * DataBinding summary: "A.text → B.content"
- */
-export function summarizeBinding(b: DataBinding): string {
-  const out = b.output || '*'
-  return `${b.from}.${out} → ${b.to}.${b.input}`
 }

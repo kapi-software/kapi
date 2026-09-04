@@ -63,7 +63,6 @@ function WorkflowCard({
 
   const nodeCount = workflow.graph.nodes.length;
   const edgeCount = workflow.graph.edges.length;
-  const bindingCount = workflow.graph.bindings.length;
 
   return (
     <>
@@ -109,8 +108,7 @@ function WorkflowCard({
               ? `${new Date(latestRun.started_at).toLocaleString()} · ${t(statusKey(latestRun.status))}`
               : t("workflow.neverRun")}
             {" · "}
-            {t("workflow.nodes")}: {nodeCount} · {t("workflow.edges")}: {edgeCount} ·{" "}
-            {t("workflow.bindings")}: {bindingCount}
+            {t("workflow.nodes")}: {nodeCount} · {t("workflow.edges")}: {edgeCount}
           </p>
         </div>
 
@@ -196,9 +194,6 @@ function WorkflowCard({
           </Field>
           <Field label={t("workflow.fieldEdges")}>
             {workflow.graph.edges.length}
-          </Field>
-          <Field label={t("workflow.fieldBindings")}>
-            {workflow.graph.bindings.length}
           </Field>
           {latestRun && (
             <>

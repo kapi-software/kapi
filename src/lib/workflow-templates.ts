@@ -30,8 +30,7 @@ export interface WorkflowTemplate {
 /** 空白模板：用户从 0 开始 / Blank template */
 const BLANK_GRAPH: WorkflowGraph = {
   nodes: [],
-  edges: [],
-  bindings: [],
+  edges: [],
 }
 
 /** 定时整理（占位模板）：schedule 触发 → 一个占位动作节点
@@ -51,8 +50,7 @@ const SCHEDULE_CLEANUP_GRAPH: WorkflowGraph = {
       display_name: "步骤 1",
     },
   ],
-  edges: [],
-  bindings: [],
+  edges: [],
 }
 
 /** 剪贴板格式化（占位）：手动触发 → 一个 action 节点
@@ -70,8 +68,7 @@ const CLIPBOARD_FORMAT_GRAPH: WorkflowGraph = {
       display_name: "步骤 1",
     },
   ],
-  edges: [],
-  bindings: [],
+  edges: [],
 }
 
 /** 快捷键唤起（占位）：hotkey 触发 + 一个 action
@@ -89,8 +86,7 @@ const HOTKEY_INVOKE_GRAPH: WorkflowGraph = {
       display_name: "步骤 1",
     },
   ],
-  edges: [],
-  bindings: [],
+  edges: [],
 }
 
 // ============================================================

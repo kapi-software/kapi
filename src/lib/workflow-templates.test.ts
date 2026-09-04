@@ -29,7 +29,6 @@ describe('WORKFLOW_TEMPLATES', () => {
       const g: WorkflowGraph = t.graph
       expect(Array.isArray(g.nodes)).toBe(true)
       expect(Array.isArray(g.edges)).toBe(true)
-      expect(Array.isArray(g.bindings)).toBe(true)
       // 节点 id 唯一
       const ids = g.nodes.map((n) => n.id)
       expect(new Set(ids).size).toBe(ids.length)

@@ -1,7 +1,7 @@
 // validateGraph 单元测试 / validateGraph unit tests
 import { describe, it, expect } from 'vitest'
 import { validateGraph, hasFatalErrors } from '@/lib/workflow-graph'
-import type { WorkflowGraph, WorkflowNode, DataBinding } from '@/types'
+import type { WorkflowGraph, WorkflowNode } from '@/types'
 
 const node = (id: string): WorkflowNode => ({
   id,
@@ -9,6 +9,7 @@ const node = (id: string): WorkflowNode => ({
   plugin_id: 'p',
   action: 'a',
   config: {},
+  position: { x: 0, y: 0 },
 })
 
 const edge = (from: string, to: string): { from: string; to: string } => ({ from, to })
@@ -16,7 +17,6 @@ const edge = (from: string, to: string): { from: string; to: string } => ({ from
 const graph = (nodes: WorkflowNode[], edges: { from: string; to: string }[]): WorkflowGraph => ({
   nodes,
   edges,
-  bindings: [] as DataBinding[],
 })
 
 describe('validateGraph', () => {

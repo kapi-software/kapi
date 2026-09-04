@@ -75,16 +75,7 @@ const HTTP_PLUGIN: Plugin = makePlugin('http-plugin', {
   }],
 })
 
-const V1_PLUGIN: Plugin = makePlugin('v1-plugin', {
-  // v1 schema: Record<string, string>
-  actions: [{
-    name: 'legacy',
-    inputs: { foo: 'string' },
-    outputs: { bar: 'string' },
-  }],
-})
-
-const ALL_PLUGINS = [CLIPBOARD_PLUGIN, TEXT_PLUGIN, HTTP_PLUGIN, V1_PLUGIN]
+const ALL_PLUGINS = [CLIPBOARD_PLUGIN, TEXT_PLUGIN, HTTP_PLUGIN]
 
 // ============================================================
 // Tests
@@ -209,17 +200,6 @@ describe('P1-2: 连接校验', () => {
     )
     assertOk(r)
     expect(r.autoMap).toEqual({})
-  })
-
-  it('完全无 schema（v1 退化）→ 允许', () => {
-    const r = validateConnection(
-      { source: 'n1', target: 'n2' },
-      { id: 'n1', type: 'plugin', plugin_id: 'v1-plugin', action: 'legacy' },
-      { id: 'n2', type: 'plugin', plugin_id: 'v1-plugin', action: 'legacy' },
-      ALL_PLUGINS,
-    )
-    assertOk(r)
-    expect(r.autoMap).toEqual({}) // v1 归一化后 foo 不在 outputs
   })
 
   it('不存在的 plugin_id → 允许（运行时插件可能未加载）', () => {

@@ -74,16 +74,14 @@ fn default_true() -> bool {
 // DAG data model (mirrors frontend src/types/index.ts)
 // ============================================================
 
-/// graph schema 版本号（v0=老数据，v1=当前：含 position 字段 + 标准 bindings 语义）
-/// graph schema version (v0=legacy, v1=current: includes position field + standard bindings)
+/// graph schema 版本号（v1=当前：position 字段 + edges 携带数据映射）
+/// graph schema version (v1=current: position field + edges carry data maps)
 pub const CURRENT_GRAPH_VERSION: i32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkflowGraph {
     pub nodes: Vec<WorkflowNode>,
     pub edges: Vec<WorkflowEdge>,
-    #[serde(default)]
-    pub bindings: Vec<DataBinding>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -97,10 +95,20 @@ pub struct WorkflowNode {
     pub action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<Value>,
-    /// P5: 可编辑显示名（前端用户自定义；未设时用 action.summary 或 "步骤 N"）
-    /// P5: editable display name (frontend user override; falls back to action.summary / "Step N")
+    /// 画布坐标：保存与还原画布布局的依据
+    /// Canvas coordinates: persisted so the editor layout survives save/load
+    pub position: Position,
+    /// 可编辑显示名（前端用户自定义；未设时用 action.summary 或 "步骤 N"）
+    /// Editable display name (frontend user override; falls back to action.summary / "Step N")
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub display_name: Option<String>,
+}
+
+/// 画布坐标 / Canvas coordinates
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -116,23 +124,15 @@ pub struct WorkflowEdge {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DataBinding {
-    pub from: String,
-    pub output: String,
-    pub to: String,
-    pub input: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Workflow {
     pub id: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub graph: WorkflowGraph,
-    /// graph schema 版本；缺省视为 0（v0 老数据）
-    /// graph schema version; missing treated as 0 (legacy)
-    #[serde(rename = "schema_version", default)]
+    /// graph schema 版本
+    /// graph schema version
+    #[serde(rename = "schema_version")]
     pub schema_version: i32,
     #[serde(rename = "is_enabled")]
     pub is_enabled: bool,

@@ -1,15 +1,14 @@
-// P1-2：连接校验（连线即数据流 + 类型约束）
-// P1-2: connection validation (connection-is-data-flow + type constraints)
+// 连接校验（连线即数据流 + 类型约束）
+// Connection validation (connection-is-data-flow + type constraints)
 //
 // 核心规则：
 // Core rules:
 // 1. 上游无输出 / 下游无输入 → 允许（map 可任意）
 // 2. 上游 output type 与下游 input type 不一致 → 拒绝
-// 3. 至少一个字段对 type 一致才允许（v2 schema）；v1 退化形式宽松放行
+// 3. 至少一个字段对 type 一致才允许
 // 4. transform 节点始终允许（Handlebars 模板，类型不敏感）
 // 5. 自环（source === target）→ 拒绝
 import type { FieldSpec, Plugin } from '@/types'
-import { isStructuredField, normalizeFieldMap } from '@/types'
 
 // ============================================================
 // Types
@@ -63,7 +62,7 @@ function getInputKeys(action: ReturnType<typeof findAction>): string[] {
   return Object.keys(action.inputs)
 }
 
-/** 检查 type 是否相同（兼容 v1/v2）/ Check if two field type tokens match */
+/** 检查两个 FieldSpec 的 type 是否相同 / Check if two FieldSpecs share the same type */
 function typesMatch(source: FieldSpec, target: FieldSpec): boolean {
   // 简单的字符串类型比较：'string' == 'string' 即可
   // 严格模式可加 'number' <-> 'string' coercion 规则；当前保守匹配
@@ -103,21 +102,15 @@ export function validateConnection(
   const sourceOutputs = getOutputKeys(sourceAction)
   const targetInputs = getInputKeys(targetAction)
 
-  // 4) 完全无 schema 信息 → 放行（v1 退化；老 manifest 缺字段描述）
-  if (sourceOutputs.length === 0 && targetInputs.length === 0) {
-    return { ok: true, autoMap: {} }
-  }
-
-  // 5) 至少一端有 schema 但另一端无 → 放行（单向 schema 兼容）但 autoMap 为空
+  // 4) 任一端未声明字段 schema → 放行（manifest 可不声明 inputs/outputs）
   if (sourceOutputs.length === 0 || targetInputs.length === 0) {
     return { ok: true, autoMap: {} }
   }
 
-  // 6) 两端都有 schema：解析为 v2 后做类型匹配
-  const sourceFields = normalizeFieldMap(sourceAction?.outputs)
-  const targetFields = normalizeFieldMap(targetAction?.inputs)
+  // 5) 两端都有 schema：同名字段 + 类型匹配生成 autoMap
+  const sourceFields = sourceAction!.outputs!
+  const targetFields = targetAction!.inputs!
 
-  // 计算 autoMap：同名字段 + 类型匹配
   const autoMap: Record<string, string> = {}
   const typeMismatchFields: string[] = []
   for (const outKey of sourceOutputs) {
@@ -135,7 +128,7 @@ export function validateConnection(
 
   // 若任何同名输出/输入都类型不匹配 → 拒绝
   // 若至少一个匹配 + 其余不匹配 → 允许但提示用户
-  if (autoMap.size === undefined && Object.keys(autoMap).length === 0) {
+  if (Object.keys(autoMap).length === 0) {
     // 没有任何匹配
     if (typeMismatchFields.length > 0) {
       return {
@@ -153,6 +146,3 @@ export function validateConnection(
   // 至少有一个匹配；如有类型不匹配，作为 warning 透传（暂只决定 ok）
   return { ok: true, autoMap }
 }
-
-// 重新导出 FieldSpec 给测试用（normalizeFieldMap 已用）
-export { isStructuredField }

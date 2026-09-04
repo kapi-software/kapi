@@ -39,6 +39,12 @@ pub fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/005_trigger_cursors.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "workflow graph schema_version column",
+            sql: include_str!("../migrations/006_workflow_schema_version.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

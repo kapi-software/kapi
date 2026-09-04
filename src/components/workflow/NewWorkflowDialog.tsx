@@ -56,7 +56,7 @@ export function NewWorkflowDialog({ open, onOpenChange }: Props) {
     // 模板 graph 通过 search params 传给编辑器
     // Template graph travels to the editor via search params
     const id = `wf-${uuidv4().replace(/-/g, "")}`;
-    const graphJson = JSON.stringify(selectedTemplate?.graph ?? { nodes: [], edges: [], bindings: [] } as WorkflowGraph);
+    const graphJson = JSON.stringify(selectedTemplate?.graph ?? { nodes: [], edges: [] } as WorkflowGraph);
     const params = new URLSearchParams({
       name: name.trim(),
       description: description.trim(),
